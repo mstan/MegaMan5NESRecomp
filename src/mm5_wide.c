@@ -168,9 +168,9 @@ int mm5_wide_background(uint32_t *out,int width,int height,const uint32_t *nativ
     return 1;
 }
 int mm5_wide_rank(int owner) { return owner>=0 && owner<24 && S.frame.valid?S.frame.rank[owner]:255; }
-void mm5_wide_draw(uint32_t *out,int width,const uint8_t *opaque,uint8_t *claimed,int rank) {
+void mm5_wide_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint8_t *claimed,int rank) {
     if (!s_on || !S.frame.valid || width<=256) return;
-    int left=S.frame.camera-cyc_render_native_origin(width);
+    int left=S.frame.camera-origin;
     for (int i=0;i<S.frame.count;i++) {
         const WidePart *p=&S.frame.parts[i];if (mm5_wide_rank(p->owner)!=rank) continue;
         for (int y=0;y<8;y++) for (int x=0;x<8;x++) {

@@ -175,7 +175,7 @@ static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *na
             else sprite(out, W, origin, slot, oam);
             if(owner==0 && slot==first) {mm5_coop_draw(out,W,origin,s_opaque,s_claimed);partner=1;}
         }
-        if (wide) mm5_wide_draw(out, W, s_opaque, s_claimed, rank);
+        if (wide) mm5_wide_draw(out, W, origin, s_opaque, s_claimed, rank);
     }
     if(!partner)mm5_coop_draw(out,W,origin,s_opaque,s_claimed);
     cyc_render_set_native_origin(origin); return 1;
