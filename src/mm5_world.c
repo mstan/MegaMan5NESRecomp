@@ -53,7 +53,7 @@ int mm5_world_audit_file(const char *path) {
     return s_audit != NULL;
 }
 void mm5_world_audit(const uint32_t *bg) {
-    if (!s_audit || !bg || R(0x26) >= 16 || R(0x59) || R(0x1B) || !(R(0x29) & 32) || R(0x28) >= 4) return;
+    if (!s_audit || !bg || R(0x26) >= 16 || R(0x59) || R(0x1B) || !(R(0x29) & 32) || R(0xFA)) return;
     int camera = (R(0xF9) << 8) | R(0xFC), compared = 0, mismatched = 0;
     for (int y = 0; y < 240; ++y) {
         int delta = (cyc_render_line_scroll_x(y) - (camera & 511) + 256) & 511;

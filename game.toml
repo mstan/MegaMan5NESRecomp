@@ -141,3 +141,27 @@ id = "mm5.coop.stage"
 addr = 0xD311
 length = 8
 crc32 = 0x3A317BDC
+
+[[mod_function_hook]]
+id = "mm5.coop.scroll-end"
+addr = 0xDEC6
+length = 8
+crc32 = 0x2F0F59FE
+
+[[mod_function_hook]]
+id = "mm5.coop.advance"
+addr = 0xCB80
+length = 8
+crc32 = 0x767DF73F
+
+[[mod_function_hook]]
+id = "mm5.coop.retreat"
+addr = 0xCC68
+length = 8
+crc32 = 0x767DF73F
+
+[[mod_function_hook]]
+id = "mm5.coop.vertical"
+addr = 0xCE82
+length = 8
+crc32 = 0xF2682DA1

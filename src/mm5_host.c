@@ -65,6 +65,7 @@ static bool option(void *ctx, const char *name, const char *value) {
         if(strcmp(value,"megaman") && strcmp(value,"protoman"))return false;
         s_coop_roster=!strcmp(value,"protoman");mm5_coop_set(mm5_coop_enabled(),s_coop_roster);return true;
     }
+    if(!strcmp(name,"--coop-test-poke"))return mm5_coop_test_poke(value);
     if (!strcmp(name, "--world-audit")) return mm5_world_audit_file(value);
     if (!strcmp(name, "--widescreen")) {
         if (strcmp(value,"on") && strcmp(value,"off")) return false;
@@ -108,10 +109,11 @@ const CycHostExtras *cyc_host_extras(void) {
         {"--widescreen", true, "on|off: adaptive Fit and native widened actor activation"},
         {"--coop", true, "on|off: personal local co-op development controls"},
         {"--coop-roster", true, "megaman|protoman: character assigned to player one"},
+        {"--coop-test-poke", true, "FRAME:SEAT:ADDR:BYTE: scheduled personal RAM fixture (seat0 or1)"},
     };
     static const CycHostExtras extras = {
         .power_on = power, .input = input, .frame_end = end, .tcp_setup = tcp,
-        .option = option, .options = options, .option_count = 9, .input_profile = &profile,
+        .option = option, .options = options, .option_count = 10, .input_profile = &profile,
     };
     return &extras;
 }

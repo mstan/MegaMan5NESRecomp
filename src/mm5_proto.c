@@ -47,7 +47,7 @@ const CycProtoAtlas *mm5_proto_atlas(void) { return s_loaded ? &s_atlas : NULL; 
 static int safe(void) {
     int state = R(0x30);
     return R(0x26) < 16 && (state == 0 || state == 1 || state == 3) &&
-        !R(0x1B) && R(0x28) < 4 && !R(0x54) && !R(0x59) && !R(0x5A) &&
+        !R(0x1B) && !R(0xFA) && !R(0x54) && !R(0x59) && !R(0x5A) &&
         !R(0x390) && (R(0xB0) & 31);
 }
 static void sound(int id) {
@@ -56,7 +56,7 @@ static void sound(int id) {
 }
 static int shield_up(void) {
     return selected() && s_mode && !S.teleport && R(0x30) == 1 &&
-        !R(0x34) && !R(0x54) && R(0x28) < 4 && !R(0x390);
+        !R(0x34) && !R(0x54) && !R(0xFA) && !R(0x390);
 }
 static int controller(uint16_t address) {
     (void)address;

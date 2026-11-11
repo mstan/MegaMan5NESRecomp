@@ -30,7 +30,7 @@ static int s_on;
 
 static int geometry(int width, int *camera, int *left, int *lo, int *hi) {
     if (!s_on || width <= 256 || width > CYC_VIDEO_MAX_WIDTH || R(0x26) >= 16 || R(0x59) || R(0x1B) ||
-        !(R(0x29) & 32) || R(0x28) >= 4) return 0;
+        !(R(0x29) & 32) || R(0xFA)) return 0;
     int page = R(0xF9), start = page - R(0x2B);
     if (start < 0 || R(0x2A) > 31) return 0;
     *camera = page * 256 + R(0xFC); *lo = start * 256; *hi = (start + R(0x2A) + 1) * 256;

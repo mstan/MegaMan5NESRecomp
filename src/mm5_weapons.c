@@ -31,10 +31,10 @@ static uint8_t source(int bank, int address) {
     return mm5_cart_prg(bank, address);
 }
 static int safe(void) {
-    /* $28 retains 1/2 during normal horizontal scrolling, including rest.
-     * Its vertical transition directions are 4/8. */
+    /* $28 retains its direction after scrolling, including 4/8 in vertical
+     * rooms. $FA is the pending vertical scroll, not an idle-room lock. */
     return !mm5_proto_swapping() && READ(0x26) < 16 && READ(0x30) <= 3 && (READ(0xB0) & 31) &&
-        !READ(0x54) && !READ(0x59) && !READ(0x1B) && READ(0x28) < 4 && !READ(0x5A) &&
+        !READ(0x54) && !READ(0x59) && !READ(0x1B) && !READ(0xFA) && !READ(0x5A) &&
         !READ(0x390);
 }
 static int owned(int id) { return !id || (READ(0xB0 + id) & 128); }
@@ -49,7 +49,7 @@ void mm5_weapons_power(void) {
     memset(s_players,0,sizeof s_players);
 }
 void mm5_weapons_input(void) {
-    int allowed=mm5_coop_enabled()?(READ(0x26)<16 && !READ(0x54) && !READ(0x59) && !READ(0x1B) && READ(0x28)<4 && !READ(0x5A)):safe();
+    int allowed=mm5_coop_enabled()?(READ(0x26)<16 && !READ(0x54) && !READ(0x59) && !READ(0x1B) && !READ(0xFA) && !READ(0x5A)):safe();
     for(int seat=0;seat<2;seat++) {
         unsigned held=seat && !mm5_coop_enabled()?0:nes_input_game_buttons(seat+1)&(CYC_GAME_L|CYC_GAME_R);
         unsigned fresh=held&~s_players[seat].previous;

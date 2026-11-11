@@ -14,3 +14,4 @@ void mm5_coop_build(void);
 void mm5_coop_latch(void);
 void mm5_coop_draw(uint32_t *out, int width, int origin, const uint8_t *opaque, uint8_t *claimed);
 int mm5_coop_json(char *out, int capacity);
+int mm5_coop_test_poke(const char *value);

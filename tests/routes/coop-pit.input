@@ -1,0 +1,35 @@
+# Native renderer pit deaths keep HP nonzero until the co-op lifecycle handles
+# state7. Position below the viewport; never set a death or life-loss flag.
+300 START
+302 -
+600 START
+602 -
+900 START
+902 -
+1500 RIGHT
+1550 -
+1570 A
+1590 -
+1620 B
+1622 -
+2350 HOLD 0308-0317 00
+2400 POKE 0030 01
+2400 POKE 0378 08
+2400 POKE 0390 01
+2400 POKE 0360 00
+2400 POKE 03D8 00
+2400 POKE 03F0 00
+# The fallen player's Start cannot open the survivor's native inventory.
+2450 START
+2451 -
+# The living player can still pause and resume their own inventory.
+2500 2:START
+2501 2:-
+2640 2:START
+2641 2:-
+2800 POKE 0030 01
+2800 POKE 0378 08
+2800 POKE 0390 01
+2800 POKE 0360 00
+2800 POKE 03D8 00
+2800 POKE 03F0 00
