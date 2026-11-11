@@ -19,8 +19,9 @@ typedef struct { uint8_t valid,seat;uint16_t count,camera;Mm5ProtoBody body;Part
 typedef struct {
     char magic[4];uint8_t enabled,initialized,stage,anchor,current,menu,pauser,pending_pause,roster;
     uint8_t raw[2],raw_previous[2],fresh[2];
+    uint8_t ai_active,ai_actor,ai_common,ai_pad[2],wiping,retry;
     Player player[2];Picture build,frame;
-    uint64_t updates[2],world_updates,failures;
+    uint64_t updates[2],world_updates,failures,hits[2],contacts[2],deaths[2],handoffs,wipes,targets[2],checks;
 } Coop;
 static Coop C;
 static int s_on,s_roster,s_scope,s_personal_bhv;
@@ -116,10 +117,25 @@ static int private_step(int seat) {
 }
 static void initialize(void) {
     C.anchor=C.current=0;C.stage=R(0x26);C.initialized=1;C.menu=0;C.pending_pause=255;
+    Player saved[2];memcpy(saved,C.player,sizeof saved);
     capture(&C.player[0]);C.player[1]=C.player[0];
+    for(int seat=0;seat<2;seat++) {
+        C.player[seat].dead=0;
+        if(C.retry)for(int a=0xB1;a<=0xBC;a++)set_personal(&C.player[seat],a,personal(&saved[seat],a));
+    }
+    C.retry=C.wiping=0;
     int x=(R(0x348)<<8)|R(0x330);x=x>=32?x-16:x+16;
     set_personal(&C.player[1],0x330,x);set_personal(&C.player[1],0x348,x>>8);
     for(int seat=0;seat<2;seat++)C.player[seat].previous=C.raw[seat];
+    project(&C.player[C.anchor]);
+}
+static void deaths(void) {
+    for(int seat=0;seat<2;seat++)if(!C.player[seat].dead && !(personal(&C.player[seat],0xB0)&31)) {
+        C.player[seat].dead=1;C.deaths[seat]++;
+        for(int base=0x300;base<=0x5B8;base+=24)for(int slot=1;slot<8;slot++)set_personal(&C.player[seat],base+slot,0);
+        if(seat==C.current)project(&C.player[seat]);
+    }
+    if(C.player[0].dead && C.player[1].dead && !C.wiping){C.wiping=1;C.wipes++;}
 }
 static int controller(uint16_t address) {
     (void)address;if(!s_on || cyc_mod_isolated())return 0;
@@ -132,22 +148,94 @@ static int controller(uint16_t address) {
         initialize();
     }
     if(C.menu || R(0x26)>=16)return 0;
-    C.current=C.anchor;capture(&C.player[C.anchor]);
-    if(!private_step(C.anchor^1))C.failures++;
+    C.current=C.anchor;capture(&C.player[C.anchor]);deaths();
+    if(C.player[C.anchor].dead && !C.player[C.anchor^1].dead) {
+        C.anchor^=1;C.current=C.anchor;project(&C.player[C.anchor]);C.handoffs++;
+        mm5_weapons_dispatch(0xDEB1);P(0x18,255);
+    }
+    if(R(0x30)<=8 && !private_step(C.anchor^1))C.failures++;
     C.current=C.anchor;P(0x14,C.raw[C.anchor]&~C.player[C.anchor].previous&~0x30);P(0x16,C.raw[C.anchor]&~0x30);
     P(0x15,0);P(0x17,0);return 0;
 }
 static int after_controller(uint16_t address) {
     (void)address;if(s_on && C.initialized && !cyc_mod_isolated() && !C.menu) {capture(&C.player[C.anchor]);C.updates[C.anchor]++;}return 0;
 }
+/* Native AI runs once, borrowing the nearest living player's complete personal
+ * context. Its original common collision pass handles that target; the same
+ * cartridge routines then check the other player's private shots and hitbox. */
+static int ai_begin(uint16_t address) {
+    (void)address;
+    if(!s_on || !C.initialized || cyc_mod_isolated() || C.menu)return 0;
+    CycModRegs r;cyc_mod_regs(&r);int actor=r.x;
+    if(actor<8 || actor>=24 || !R(0x300+actor))return 0;
+    capture(&C.player[C.current]);
+    int seat=C.anchor,ex=(R(0x348+actor)<<8)|R(0x330+actor),ey=R(0x378+actor);int64_t best=INT64_MAX;
+    for(int i=0;i<2;i++)if(!C.player[i].dead && (personal(&C.player[i],0xB0)&31)) {
+        int dx=((personal(&C.player[i],0x348)<<8)|personal(&C.player[i],0x330))-ex;
+        int dy=personal(&C.player[i],0x378)-ey;int64_t distance=(int64_t)dx*dx+(int64_t)dy*dy;
+        if(distance<best){best=distance;seat=i;}
+    }
+    C.ai_active=1;C.ai_actor=(uint8_t)actor;C.ai_common=0;C.ai_pad[0]=R(0x14);C.ai_pad[1]=R(0x16);
+    C.current=(uint8_t)seat;project(&C.player[seat]);
+    C.targets[seat]++;
+    P(0x14,C.fresh[seat]&~0x30);P(0x16,C.raw[seat]&~0x30);return 0;
+}
+static int ai_common(uint16_t address) {
+    (void)address;if(s_on && C.ai_active && !cyc_mod_isolated())C.ai_common=1;return 0;
+}
+static int other_collision(int seat,int actor) {
+    if(C.player[seat].dead || !(personal(&C.player[seat],0xB0)&31) || !R(0x300+actor))return 1;
+    C.checks++;
+    uint8_t before[2048],after[2048];snapshot_ram(before);
+    int owner=C.current;C.current=(uint8_t)seat;project(&C.player[seat]);
+    /* Reflection allocates a native Buster in its own isolated scope. */
+    int blocked=mm5_proto_try_shield(actor);capture(&C.player[seat]);C.current=(uint8_t)owner;project(&C.player[owner]);
+    if(blocked)return 1;
+    snapshot_ram(before);
+    if(!cyc_mod_isolate_begin())return 0;
+    C.current=(uint8_t)seat;project(&C.player[seat]);P(0x15,0);P(0x17,0);
+    s_scope=1;int enabled=hooks(1),ok=enabled;CycModRegs r;cyc_mod_regs(&r);r.x=(uint8_t)actor;
+    int kick=R(0x30)<6 && R(0x558)==0xB0;
+    if(ok)ok=cyc_mod_call(kick?0xEF87:0xEFF8,&r);
+    if(ok && !(r.p&1)) {
+        P(0, R(0x408+actor)&64);r.x=(uint8_t)actor;
+        ok=cyc_mod_call(0x809D,&r);if(ok)C.hits[seat]++;
+    }
+    if(ok && R(0x300+actor) && (R(0x408+actor)&128) && !R(0x5B8) && R(0x30)<6) {
+        r.x=(uint8_t)actor;ok=cyc_mod_call(0xEF87,&r);
+        if(ok && !(r.p&1)) {
+            int hp=R(0xB0)&31;r.x=(uint8_t)actor;ok=cyc_mod_call(0x82B8,&r);
+            if(ok && (R(0xB0)&31)<hp)C.contacts[seat]++;
+        }
+    }
+    if(ok){capture(&C.player[seat]);snapshot_ram(after);}
+    if(enabled)hooks(0);s_scope=0;cyc_mod_isolate_end();C.current=(uint8_t)owner;
+    if(ok)merge_world(before,after);return ok;
+}
 static int personal_end(uint16_t address) {
     (void)address;
     /* Finish the native loop at its common terrain-hazard check, after slot7.
      * Returning from here would incorrectly omit the player's spike checks. */
     if(s_on && s_scope && s_personal_bhv && R(0xA6)>=7)P(0xA6,23);
+    if(s_on && C.ai_active && !cyc_mod_isolated()) {
+        capture(&C.player[C.current]);
+        if(C.ai_common && !other_collision(C.current^1,C.ai_actor))C.failures++;
+        if(personal(&C.player[C.current],0x30)>=9 && !C.player[C.current].dead)C.anchor=C.current;
+        C.ai_active=C.ai_common=0;C.current=C.anchor;project(&C.player[C.anchor]);
+        P(0x14,C.ai_pad[0]);P(0x16,C.ai_pad[1]);deaths();
+    }
     return 0;
 }
 static int world_begin(uint16_t address) { (void)address;if(s_on && C.initialized && !cyc_mod_isolated())C.world_updates++;return 0; }
+static int stage_load(uint16_t address) {
+    (void)address;if(!s_on || cyc_mod_isolated())return 0;
+    if(C.initialized) {
+        capture(&C.player[C.current]);C.retry=(uint8_t)(C.wiping && C.stage==R(0x26));
+        C.initialized=C.ai_active=C.menu=0;C.current=C.anchor=0;C.pending_pause=255;
+        memset(&C.build,0,sizeof C.build);memset(&C.frame,0,sizeof C.frame);
+    }
+    return 0;
+}
 static int pause_entry(uint16_t address) {
     (void)address;
     if(!s_on || !C.initialized || C.menu || C.pending_pause>1 || cyc_mod_isolated())return 0;
@@ -162,14 +250,14 @@ void mm5_coop_input(uint8_t buttons[2]) {
     if(C.menu)buttons[0]=C.raw[C.pauser];
     else {
         C.pending_pause=255;
-        buttons[0]=C.raw[C.anchor];
+        buttons[0]=C.raw[C.ai_active?C.current:C.anchor];
         for(int seat=0;seat<2;seat++)if(C.fresh[seat]&16){C.pending_pause=(uint8_t)seat;buttons[0]|=16;break;}
     }
     buttons[1]=0; /* Original pad-2 Select/B are native debug controls. */
 }
 void mm5_coop_end(void) {
     if(!s_on)return;
-    if(C.initialized && !C.menu && R(0x26)<16){C.current=C.anchor;capture(&C.player[C.anchor]);}
+    if(C.initialized && !C.menu && R(0x26)<16){capture(&C.player[C.current]);deaths();}
     for(int seat=0;seat<2;seat++)C.player[seat].previous=C.raw[seat];
 }
 static uint8_t pattern(const uint8_t banks[6],int address) {
@@ -182,7 +270,7 @@ static uint8_t pattern(const uint8_t banks[6],int address) {
 void mm5_coop_build(void) {
     memset(&C.build,0,sizeof C.build);
     if(!s_on || !C.initialized || C.menu || R(0x26)>=16)return;
-    int seat=C.anchor^1,owner=C.current;
+    int seat=C.current^1,owner=C.current;
     if(C.player[seat].dead || !cyc_mod_isolate_begin())return;
     C.build.camera=(uint16_t)((R(0xF9)<<8)|R(0xFC));C.current=(uint8_t)seat;project(&C.player[seat]);int camera=center_camera();
     P(0x9F,4);for(int i=0;i<256;i+=4)P(0x200+i,248);P(0xEC,255);P(0xEE,255);P(0xEF,255);
@@ -228,18 +316,18 @@ void mm5_coop_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint
     }
 }
 void mm5_coop_power(void) { memset(&C,0,sizeof C);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses(); }
-static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause"};
+static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage"};
 void mm5_coop_set(int enabled,int roster) {
     if(enabled)mm5_proto_cancel_swap();
     s_on=enabled!=0;s_roster=roster!=0;C.initialized=0;C.current=C.anchor=0;C.pending_pause=255;
     for(int i=0;i<sizeof HOOKS/sizeof *HOOKS;i++)nes_mod_set_function_hook_enabled(HOOKS[i],s_on);
     nes_mod_set_local_only("MM5 personal co-op (unqualified netplay)",s_on);mm5_view_coop(s_on);
 }
-static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC02",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;memcpy(out,&C,sizeof C);return sizeof C;}
+static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC03",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;memcpy(out,&C,sizeof C);return sizeof C;}
 static int valid(const uint8_t *in,int len) {
     if(!len)return !s_on;if(!in || len!=sizeof C)return 0;
     static Coop p;memcpy(&p,in,sizeof p);
-    if(memcmp(p.magic,"MC02",4)||p.enabled!=s_on||p.roster!=s_roster||p.initialized>1||p.anchor>1||p.current>1||p.menu>1||p.pauser>1)return 0;
+    if(memcmp(p.magic,"MC03",4)||p.enabled!=s_on||p.roster!=s_roster||p.initialized>1||p.anchor>1||p.current>1||p.menu>1||p.pauser>1||p.ai_active>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.player[0].dead>1||p.player[1].dead>1)return 0;
     const Picture *f[2]={&p.build,&p.frame};
     for(int i=0;i<2;i++) {
         if(f[i]->valid>1||f[i]->seat>1||f[i]->count>PART_CAP||f[i]->body.pose>=CYC_PROTO_POSE_COUNT||f[i]->body.active>1||f[i]->body.right>1||f[i]->body.flipped>1||f[i]->body.behind>1)return 0;
@@ -256,11 +344,18 @@ void mm5_coop_register(void) {
     addresses();nes_mod_register_function_entry_plugin(HOOKS[0],0x8000,controller);nes_mod_register_function_entry_plugin(HOOKS[1],0xDEB4,after_controller);
     nes_mod_register_function_entry_plugin(HOOKS[2],0x8039,personal_end);nes_mod_register_function_entry_plugin(HOOKS[3],0x8000,world_begin);
     nes_mod_register_function_entry_plugin(HOOKS[4],0xDE89,pause_entry);
+    nes_mod_register_function_entry_plugin(HOOKS[5],0x8004,ai_begin);nes_mod_register_function_entry_plugin(HOOKS[6],0x805B,ai_common);
+    nes_mod_register_function_entry_plugin(HOOKS[7],0xD311,stage_load);
     nes_mod_register_savestate_hook("mm5.coop",get,set);nes_mod_register_savestate_validator("mm5.coop",valid);
 }
 int mm5_coop_json(char *out,int cap) {
-    return snprintf(out,cap,"\"coop\":{\"on\":%d,\"ready\":%u,\"anchor\":%u,\"menu\":%u,\"pauser\":%u,\"world\":%llu,\"updates\":[%llu,%llu],\"failed\":%llu,\"players\":[[%d,%d,%d,%d,%d],[%d,%d,%d,%d,%d]]}",
+    return snprintf(out,cap,"\"coop\":{\"on\":%d,\"ready\":%u,\"anchor\":%u,\"menu\":%u,\"pauser\":%u,\"world\":%llu,\"updates\":[%llu,%llu],\"failed\":%llu,\"combat\":[[%llu,%llu],[%llu,%llu]],\"deaths\":[%llu,%llu],\"handoffs\":%llu,\"wipes\":%llu,\"targets\":[%llu,%llu],\"checks\":%llu,\"shots\":[[%d,%d,%d],[%d,%d,%d]],\"lives\":%u,\"actor8\":[%u,%u,%u,%u,%u],\"players\":[[%d,%d,%d,%d,%d],[%d,%d,%d,%d,%d]]}",
         s_on,C.initialized,C.anchor,C.menu,C.pauser,(unsigned long long)C.world_updates,(unsigned long long)C.updates[0],(unsigned long long)C.updates[1],(unsigned long long)C.failures,
+        (unsigned long long)C.hits[0],(unsigned long long)C.contacts[0],(unsigned long long)C.hits[1],(unsigned long long)C.contacts[1],
+        (unsigned long long)C.deaths[0],(unsigned long long)C.deaths[1],(unsigned long long)C.handoffs,(unsigned long long)C.wipes,
+        (unsigned long long)C.targets[0],(unsigned long long)C.targets[1],(unsigned long long)C.checks,
+        personal(&C.player[0],0x301),personal(&C.player[0],0x302),personal(&C.player[0],0x303),personal(&C.player[1],0x301),personal(&C.player[1],0x302),personal(&C.player[1],0x303),
+        R(0xBF),R(0x308),R(0x458),R(0x338),R(0x380),R(0x428),
         personal(&C.player[0],0x330),personal(&C.player[0],0x378),personal(&C.player[0],0xB0)&31,personal(&C.player[0],0x32),personal(&C.player[0],0x30),
         personal(&C.player[1],0x330),personal(&C.player[1],0x378),personal(&C.player[1],0xB0)&31,personal(&C.player[1],0x32),personal(&C.player[1],0x30));
 }

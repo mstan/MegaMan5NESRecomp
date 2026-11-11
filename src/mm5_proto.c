@@ -153,10 +153,8 @@ static void reflect(int enemy) {
     P(0x300 + enemy, 0); P(0x5A0 + enemy, 0); P(0x528 + enemy, 0);
     S.blocks++; sound(0x1E);
 }
-static int shield(uint16_t address) {
-    (void)address;
+int mm5_proto_try_shield(int enemy) {
     if (!shield_up() || cyc_mod_isolated()) return 0;
-    CycModRegs r; cyc_mod_regs(&r); int enemy = r.x;
     if (enemy < 8 || enemy >= 24 || !(R(0x408 + enemy) & 128)) return 0;
     int type = R(0x300 + enemy);
     /* Verified straight projectiles; bosses, bodies and large attacks stay dangerous. */
@@ -165,7 +163,13 @@ static int shield(uint16_t address) {
     int dx = ex - x, dy = (int)R(0x378 + enemy) - R(0x378);
     int right = (R(0x528) & 32) != 0;
     if ((right ? dx < 0 || dx > 20 : dx > 0 || dx < -20) || dy < -16 || dy > 12) return 0;
-    reflect(enemy); r.p |= 1; cyc_mod_set_regs(&r); return 1;
+    reflect(enemy); return 1;
+}
+static int shield(uint16_t address) {
+    (void)address;
+    CycModRegs r; cyc_mod_regs(&r);
+    if (!mm5_proto_try_shield(r.x)) return 0;
+    r.p |= 1; cyc_mod_set_regs(&r); return 1;
 }
 
 void mm5_proto_body(Mm5ProtoBody *body) {

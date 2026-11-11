@@ -123,3 +123,21 @@ id = "mm5.coop.pause"
 addr = 0xDE89
 length = 8
 crc32 = 0x5A71D997
+
+[[mod_function_hook]]
+id = "mm5.coop.ai"
+addr = 0x8004
+length = 8
+crc32 = 0xC91BE3F6
+
+[[mod_function_hook]]
+id = "mm5.coop.common"
+addr = 0x805B
+length = 8
+crc32 = 0x824853AD
+
+[[mod_function_hook]]
+id = "mm5.coop.stage"
+addr = 0xD311
+length = 8
+crc32 = 0x3A317BDC

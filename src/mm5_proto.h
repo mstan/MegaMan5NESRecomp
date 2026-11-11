@@ -17,6 +17,7 @@ int mm5_proto_active(void);
 int mm5_proto_selected(void);
 int mm5_proto_swapping(void);
 void mm5_proto_cancel_swap(void);
+int mm5_proto_try_shield(int enemy);
 void mm5_proto_body(Mm5ProtoBody *body);
 void mm5_view_power(void);
 void mm5_view_register(void);
