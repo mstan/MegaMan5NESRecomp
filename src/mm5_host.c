@@ -5,6 +5,7 @@
 #include "mm5_wide.h"
 #include "mm5_coop.h"
 #include "cyc_host_extras.h"
+#include "cyc_core.h"
 #include "cyc_input.h"
 #include "cyc_ring.h"
 #include "cyc_tcp.h"
@@ -15,8 +16,16 @@
 static FILE *s_log;
 static int s_proto_on, s_proto_mode = 1, s_proto_start = 1;
 static int s_coop_roster;
+static unsigned s_extra_lines;
+static void timing(unsigned lines) {
+    s_extra_lines=lines;
+    if(!lines || cyc_extra_scanlines_supported())cyc_set_extra_scanlines(lines);
+    nes_mod_set_local_only("MM5 CPU budget (unqualified netplay)",lines!=0);
+}
+static void activate_slowdown(void) {timing(262);}
+static void loaded(void *ctx) {(void)ctx;timing(s_extra_lines);}
 
-static void reset(void) { mm5_coop_set(0,s_coop_roster);mm5_weapons_set(0);s_proto_on=0;mm5_proto_set(0,s_proto_mode,s_proto_start);mm5_wide_set(0,"fit"); }
+static void reset(void) { mm5_coop_set(0,s_coop_roster);mm5_weapons_set(0);s_proto_on=0;mm5_proto_set(0,s_proto_mode,s_proto_start);mm5_wide_set(0,"fit");timing(0); }
 static void activate_wide(void) {
     char aspect[24]="fit";
     nes_mod_option_value("mega-man-5-usa.enhancement.widescreen","widescreen","aspect",aspect,sizeof aspect);
@@ -41,8 +50,9 @@ NES_MOD_CONSTRUCTOR(register_mm5) {
     nes_mod_register_activation_plugin("mega-man-5-usa.weapons", activate_weapons);
     nes_mod_register_activation_plugin("mega-man-5-usa.protoman", activate_proto);
     nes_mod_register_activation_plugin("mega-man-5-usa.widescreen", activate_wide);
+    nes_mod_register_activation_plugin("mega-man-5-usa.slowdown", activate_slowdown);
 }
-static void power(void *ctx) { (void)ctx; mm5_cart_power();mm5_coop_power();mm5_weapons_power();mm5_proto_power();mm5_wide_power(); }
+static void power(void *ctx) { (void)ctx; mm5_cart_power();mm5_coop_power();mm5_weapons_power();mm5_proto_power();mm5_wide_power();timing(s_extra_lines); }
 static void input(void *ctx, uint8_t buttons[2]) { (void)ctx;mm5_coop_input(buttons);mm5_weapons_input(); }
 static void end(void *ctx) {
     (void)ctx;mm5_coop_end();mm5_weapons_end();mm5_proto_end();
@@ -51,6 +61,7 @@ static void end(void *ctx) {
         mm5_proto_json(fields + n, sizeof fields - n);
         n = (int)strlen(fields); fields[n++] = ','; mm5_wide_json(fields+n,sizeof fields-n);
         n = (int)strlen(fields); fields[n++] = ','; mm5_coop_json(fields+n,sizeof fields-n);
+        n = (int)strlen(fields);snprintf(fields+n,sizeof fields-n,",\"timing\":{\"extra_lines\":%u}",cyc_extra_scanlines());
         fprintf(s_log, "{\"frame\":%u,%s}\n", cyc_ring_frame, fields);
     }
 }
@@ -66,6 +77,10 @@ static bool option(void *ctx, const char *name, const char *value) {
         s_coop_roster=!strcmp(value,"protoman");mm5_coop_set(mm5_coop_enabled(),s_coop_roster);return true;
     }
     if(!strcmp(name,"--coop-test-poke"))return mm5_coop_test_poke(value);
+    if(!strcmp(name,"--slowdown-reduction")) {
+        if(strcmp(value,"on") && strcmp(value,"off"))return false;
+        timing(!strcmp(value,"on")?262:0);return true;
+    }
     if (!strcmp(name, "--world-audit")) return mm5_world_audit_file(value);
     if (!strcmp(name, "--widescreen")) {
         if (strcmp(value,"on") && strcmp(value,"off")) return false;
@@ -90,6 +105,7 @@ static void state(int id, const char *line) {
     mm5_proto_json(fields + n, sizeof fields - n);
     n = (int)strlen(fields); fields[n++] = ','; mm5_wide_json(fields+n,sizeof fields-n);
     n = (int)strlen(fields); fields[n++] = ','; mm5_coop_json(fields+n,sizeof fields-n);
+    n = (int)strlen(fields);snprintf(fields+n,sizeof fields-n,",\"timing\":{\"extra_lines\":%u}",cyc_extra_scanlines());
     cyc_tcp_ok(id, fields);
 }
 static void tcp(void *ctx) { (void)ctx; cyc_tcp_register("mm5_state", "MM5 native player and weapon adapter state", state); }
@@ -110,10 +126,11 @@ const CycHostExtras *cyc_host_extras(void) {
         {"--coop", true, "on|off: personal local co-op development controls"},
         {"--coop-roster", true, "megaman|protoman: character assigned to player one"},
         {"--coop-test-poke", true, "FRAME:SEAT:ADDR:BYTE: scheduled personal RAM fixture (seat0 or1)"},
+        {"--slowdown-reduction", true, "on|off: extra game CPU time; off restores stock timing"},
     };
     static const CycHostExtras extras = {
-        .power_on = power, .input = input, .frame_end = end, .tcp_setup = tcp,
-        .option = option, .options = options, .option_count = 10, .input_profile = &profile,
+        .power_on = power, .state_loaded = loaded, .input = input, .frame_end = end, .tcp_setup = tcp,
+        .option = option, .options = options, .option_count = 11, .input_profile = &profile,
     };
     return &extras;
 }
