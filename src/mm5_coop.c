@@ -626,7 +626,7 @@ void mm5_coop_register(void) {
     nes_mod_register_savestate_hook("mm5.coop",get,set);nes_mod_register_savestate_validator("mm5.coop",valid);
 }
 int mm5_coop_json(char *out,int cap) {
-    return snprintf(out,cap,"\"coop\":{\"on\":%d,\"ready\":%u,\"anchor\":%u,\"menu\":%u,\"pauser\":%u,\"world\":%llu,\"updates\":[%llu,%llu],\"failed\":%llu,\"combat\":[[%llu,%llu],[%llu,%llu]],\"deaths\":[%llu,%llu],\"handoffs\":%llu,\"wipes\":%llu,\"targets\":[%llu,%llu],\"checks\":%llu,\"shots\":[[%d,%d,%d],[%d,%d,%d]],\"transport\":[%u,%u,%u,%u,%u],\"withdrawals\":[%llu,%llu],\"rejoins\":[%llu,%llu],\"revivals\":[%llu,%llu],\"scene\":[%u,%u,%u,%u],\"transitions\":%llu,\"arrivals\":[%llu,%llu],\"pages\":[%d,%d],\"lives\":%u,\"actor8\":[%u,%u,%u,%u,%u],\"players\":[[%d,%d,%d,%d,%d],[%d,%d,%d,%d,%d]]}",
+    return snprintf(out,cap,"\"coop\":{\"on\":%d,\"ready\":%u,\"anchor\":%u,\"menu\":%u,\"pauser\":%u,\"world\":%llu,\"updates\":[%llu,%llu],\"failed\":%llu,\"combat\":[[%llu,%llu],[%llu,%llu]],\"deaths\":[%llu,%llu],\"handoffs\":%llu,\"wipes\":%llu,\"targets\":[%llu,%llu],\"checks\":%llu,\"shots\":[[%d,%d,%d],[%d,%d,%d]],\"transport\":[%u,%u,%u,%u,%u],\"withdrawals\":[%llu,%llu],\"rejoins\":[%llu,%llu],\"revivals\":[%llu,%llu],\"scene\":[%u,%u,%u,%u],\"transitions\":%llu,\"arrivals\":[%llu,%llu],\"pages\":[%d,%d],\"lives\":%u,\"tanks\":[%u,%u],\"coil\":[%d,%d],\"actor8\":[%u,%u,%u,%u,%u],\"players\":[[%d,%d,%d,%d,%d],[%d,%d,%d,%d,%d]]}",
         s_on,C.initialized,C.anchor,C.menu,C.pauser,(unsigned long long)C.world_updates,(unsigned long long)C.updates[0],(unsigned long long)C.updates[1],(unsigned long long)C.failures,
         (unsigned long long)C.hits[0],(unsigned long long)C.contacts[0],(unsigned long long)C.hits[1],(unsigned long long)C.contacts[1],
         (unsigned long long)C.deaths[0],(unsigned long long)C.deaths[1],(unsigned long long)C.handoffs,(unsigned long long)C.wipes,
@@ -637,7 +637,7 @@ int mm5_coop_json(char *out,int cap) {
         (unsigned long long)C.revivals[0],(unsigned long long)C.revivals[1],
         C.scene_active,C.follow,C.section,C.scene_page,(unsigned long long)C.transitions,(unsigned long long)C.arrivals[0],(unsigned long long)C.arrivals[1],
         personal(&C.player[0],0x348),personal(&C.player[1],0x348),
-        R(0xBF),R(0x308),R(0x458),R(0x338),R(0x380),R(0x428),
+        R(0xBF),R(0xBD)&15,R(0xBE)&15,mm5_coop_read(0,0xBA)&31,mm5_coop_read(1,0xBA)&31,R(0x308),R(0x458),R(0x338),R(0x380),R(0x428),
         personal(&C.player[0],0x330),personal(&C.player[0],0x378),personal(&C.player[0],0xB0)&31,personal(&C.player[0],0x32),personal(&C.player[0],0x30),
         personal(&C.player[1],0x330),personal(&C.player[1],0x378),personal(&C.player[1],0xB0)&31,personal(&C.player[1],0x32),personal(&C.player[1],0x30));
 }

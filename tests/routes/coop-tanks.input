@@ -1,0 +1,41 @@
+# Shared native E/M tanks with player two owning the paused inventory.
+# The two A requests must consume one item and affect only that user.
+300 START
+302 -
+600 START
+602 -
+900 START
+902 -
+1500 RIGHT
+1550 -
+1570 A
+1590 -
+1620 B
+1622 -
+2350 HOLD 0308-0317 00
+2400 POKE 00BD 81
+2400 POKE 00BE 81
+2450 2:START
+2451 2:-
+2600 POKE 0050 07
+2610 A
+2610 2:A
+2611 -
+2611 2:-
+2660 START
+2661 -
+2750 POKE 0050 0F
+2760 A
+2760 2:A
+2761 -
+2761 2:-
+# Empty items must neither wrap their shared count nor heal the other player.
+2860 POKE 0050 07
+2870 2:A
+2871 2:-
+2890 POKE 0050 0F
+2900 2:A
+2901 2:-
+2950 POKE 0050 00
+2960 2:START
+2961 2:-
