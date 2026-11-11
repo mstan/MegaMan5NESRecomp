@@ -1,0 +1,44 @@
+# Exercise checkpoint revival after a native contact death. The survivor is
+# teleported into Napalm Man's first checkpoint room using its authored room
+# header. Native $69 (furthest screen), checkpoint/revival flags and lives are
+# never set. This bypasses the intervening route and does not qualify its doors.
+300 START
+302 -
+600 START
+602 -
+900 START
+902 -
+1500 RIGHT
+1550 -
+1570 A
+1590 -
+1620 B
+1622 -
+2350 HOLD 0308-0317 00
+2400 POKE 00B0 81
+2400 POKE 05B8 00
+2400 UNHOLD 0308
+2400 POKE 0308 55
+2400 POKE 0338 80
+2400 POKE 0350 00
+2400 POKE 0380 B4
+2400 POKE 0398 00
+2400 POKE 0410 87
+2400 POKE 0530 80
+2400 POKE 0560 01
+2400 POKE 0548 00
+2400 POKE 0578 00
+2400 POKE 0590 2C
+2400 POKE 05A8 F3
+2401 POKE 0308 00
+2500 POKE 0030 00
+2500 POKE 0330 80
+2500 POKE 0348 10
+2500 POKE 0378 B4
+2500 POKE 0390 00
+2500 POKE 0029 A8
+2500 POKE 002A 02
+2500 POKE 002B 00
+2500 POKE 0028 01
+2500 POKE 00FC 00
+2500 POKE 00F9 10

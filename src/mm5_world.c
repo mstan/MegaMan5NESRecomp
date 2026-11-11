@@ -40,6 +40,11 @@ int mm5_world_tile(int screen, int x, int y, Mm5WorldTile *out) {
     out->metatile = (uint8_t)meta; out->art_bank = (uint8_t)art;
     return 1;
 }
+int mm5_world_class(int world_x,int y) {
+    Mm5WorldTile tile;
+    if(world_x<0 || y<0 || y>=240 || !mm5_world_tile(world_x/256,world_x&255,y,&tile))return -1;
+    return mm5_cart_prg(tile.art_bank,0xB100+tile.metatile)&0xF0;
+}
 int mm5_world_audit_file(const char *path) {
     if (s_audit) fclose(s_audit);
     s_audit = fopen(path, "w");

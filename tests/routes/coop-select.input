@@ -1,0 +1,35 @@
+# A 90-frame Select hold withdraws one player; a fresh press rejoins near
+# the grounded partner. Attempts to withdraw the last visible player fail.
+300 START
+302 -
+600 START
+602 -
+900 START
+902 -
+1500 RIGHT
+1550 -
+1570 A
+1590 -
+1620 B
+1622 -
+2350 HOLD 0308-0317 00
+2400 2:SELECT
+2490 2:-
+2500 SELECT
+2590 -
+# A native tile-replacement record creates an overhead platform in the beam's
+# column. The returning player must reach the checked floor beside the partner.
+2595 POKE 0043 04
+2595 POKE 06C0 00
+2595 POKE 06C1 24
+2595 POKE 06C2 01
+2595 POKE 06C3 26
+2600 2:SELECT
+2601 2:-
+2700 POKE 0043 00
+2800 SELECT
+2890 -
+2900 2:SELECT
+2990 2:-
+3000 SELECT
+3001 -
