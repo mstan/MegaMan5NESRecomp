@@ -1,0 +1,131 @@
+/* Optional L/R actions use native equipment tables from the loaded cartridge. */
+#include "mm5_weapons.h"
+#include "cyc_input.h"
+#include "cyc_mod.h"
+#include "logical_input.h"
+#include "mod_runtime.h"
+#include "mod_savestate.h"
+#include "mod_function_hooks.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static int s_on;
+static uint8_t *s_rom;
+typedef struct {
+    char magic[4];
+    uint8_t enabled, previous, pending, reserved;
+    uint64_t changes;
+} WeaponState;
+static WeaponState W;
+#define READ(a) cyc_mod_peek((uint16_t)(a))
+#define WRITE(a,v) cyc_mod_poke((uint16_t)(a),(uint8_t)(v))
+
+static int cartridge(void) {
+    if (s_rom) return 1;
+    size_t size = cyc_mod_copy_cart_payload(NULL, 0);
+    if (size != 524288) return 0;
+    uint8_t *bytes = (uint8_t *)malloc(size);
+    if (!bytes) return 0;
+    if (cyc_mod_copy_cart_payload(bytes, size) != size) { free(bytes); return 0; }
+    s_rom = bytes;
+    return 1;
+}
+static uint8_t source(int bank, int address) {
+    return s_rom[(size_t)bank * 8192 + (address & 8191)];
+}
+static int safe(void) {
+    /* $28 retains 1/2 during normal horizontal scrolling, including rest.
+     * Its vertical transition directions are 4/8. */
+    return READ(0x26) < 16 && READ(0x30) <= 3 && (READ(0xB0) & 31) &&
+        !READ(0x54) && !READ(0x59) && !READ(0x1B) && READ(0x28) < 4 && !READ(0x5A) &&
+        !READ(0x390);
+}
+static int owned(int id) { return !id || (READ(0xB0 + id) & 128); }
+
+void mm5_weapons_set(int enabled) {
+    s_on = enabled != 0;
+    W.previous = W.pending = 0;
+    nes_mod_set_function_hook_enabled("mm5.player", s_on);
+    nes_mod_set_local_only("MM5 weapon switching (unqualified netplay)", s_on);
+}
+void mm5_weapons_power(void) {
+    memset(&W, 0, sizeof W);
+    free(s_rom); s_rom = NULL;
+}
+void mm5_weapons_input(void) {
+    unsigned held = nes_input_game_buttons(1) & (CYC_GAME_L | CYC_GAME_R);
+    unsigned fresh = held & ~W.previous;
+    W.pending = (uint8_t)((s_on && safe() && held != (CYC_GAME_L | CYC_GAME_R)) ? fresh : 0);
+    W.previous = (uint8_t)held;
+}
+void mm5_weapons_end(void) { W.pending = 0; }
+
+int mm5_weapons_dispatch(uint16_t address) {
+    (void)address;
+    unsigned fresh = W.pending;
+    W.pending = 0;
+    if (!s_on || cyc_mod_isolated() || !safe() || !cartridge() ||
+        (fresh != CYC_GAME_L && fresh != CYC_GAME_R)) return 0;
+    int current = READ(0x32), next = current, step = fresh == CYC_GAME_L ? -1 : 1;
+    if (current > 12) return 0;
+    do { next = (next + step + 13) % 13; } while (next != current && !owned(next));
+    if (next == current) return 0;
+    int cursor;
+    for (cursor = 0; cursor < 16; ++cursor)
+        if (cursor != 7 && cursor != 15 && source(1, 0x85E1 + cursor) == next) break;
+    if (cursor == 16) return 0;
+
+    /* The native player owns slots 1..7; world actors start at slot 8.
+     * Retiring a helper clears its carrier reference without touching enemies. */
+    for (int base = 0x300; base <= 0x5B8; base += 0x18)
+        for (int slot = 1; slot <= 7; ++slot) WRITE(base + slot, 0);
+    WRITE(0x37, 0); WRITE(0x38, 0); WRITE(0x5B, 0);
+    int offset = READ(0x34), pose = READ(0x558);
+    if (offset && pose >= offset) WRITE(0x558, pose - offset);
+    WRITE(0x33, 0); WRITE(0x34, 0);
+    /* Charge Kick and the ordinary slide have different native poses. */
+    if (READ(0x558) == 0xB0 && next != 8) {
+        WRITE(0x558, 0x10); WRITE(0x540, 0); WRITE(0x570, 0);
+    }
+    WRITE(0x32, next); WRITE(0x2E, next ? next | 128 : 0); WRITE(0x50, cursor);
+    WRITE(0xED, source(1, 0x85F1 + cursor));
+    /* Same swatch and backup used by the original inventory and stage reload. */
+    for (int i = 0; i < 3; ++i) {
+        uint8_t color = source(1, 0x854B + cursor * 4 + i);
+        WRITE(0x611 + i, color); WRITE(0x631 + i, color);
+    }
+    WRITE(0x610, READ(0x600)); WRITE(0x18, 255);
+    int q = READ(0xDA) & 7;
+    if (READ(0xDC + q) == 0x88) { WRITE(0xDC + q, 0x27); WRITE(0xDA, (q + 1) & 7); }
+    W.changes++;
+    return 0;
+}
+
+static int get(uint8_t *out, int cap) {
+    if (cap < sizeof W) return -1;
+    memcpy(W.magic, "MW01", 4); W.enabled = (uint8_t)s_on;
+    memcpy(out, &W, sizeof W); return sizeof W;
+}
+static int valid(const uint8_t *in, int len) {
+    if (!len) return !s_on;
+    if (!in || len != sizeof W) return 0;
+    WeaponState next; memcpy(&next, in, sizeof next);
+    return !memcmp(next.magic, "MW01", 4) && next.enabled == s_on &&
+        next.previous <= 3 && next.pending <= 3;
+}
+static int set(const uint8_t *in, int len) {
+    if (!valid(in, len)) return 0;
+    if (len) memcpy(&W, in, sizeof W); else memset(&W, 0, sizeof W);
+    return 1;
+}
+void mm5_weapons_register(void) {
+    nes_mod_register_savestate_hook("mm5.weapons", get, set);
+    nes_mod_register_savestate_validator("mm5.weapons", valid);
+}
+int mm5_weapons_json(char *out, int cap) {
+    return snprintf(out, cap, "\"weapons\":{\"on\":%d,\"id\":%u,\"held\":%u,\"pending\":%u,\"changes\":%llu,\"chr\":%u,\"palette\":[%u,%u,%u]},\"stage\":%u,\"state\":%u,\"hp\":%u,\"charge\":%u",
+        s_on, READ(0x32), W.previous, W.pending, (unsigned long long)W.changes,
+        READ(0xED), READ(0x611), READ(0x612), READ(0x613),
+        READ(0x26), READ(0x30), READ(0xB0) & 31, READ(0x38));
+}

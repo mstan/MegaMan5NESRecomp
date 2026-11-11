@@ -1,0 +1,33 @@
+# Pose/control fixture: native terrain and player inputs; world actors are suppressed.
+300 START
+302 -
+600 START
+602 -
+900 START
+902 -
+1500 RIGHT
+1550 -
+1570 A
+1590 -
+1620 B
+1622 -
+2350 HOLD 0308-0317 00
+2400 -
+2410 RIGHT
+2425 -
+2440 A
+2445 -
+2460 B
+2462 -
+2500 B
+2592 -
+2640 DOWN+A
+2641 DOWN
+2670 -
+2710 SELECT
+2711 -
+2780 SELECT
+2781 -
+2900 START
+2902 -
+3000 -

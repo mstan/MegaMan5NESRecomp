@@ -2,3 +2,82 @@
 name = "Mega Man 5"
 output_prefix = "mega-man-5"
 console = "nes"
+
+# Fixed-bank gameplay call immediately before the native player controller.
+[[mod_function_hook]]
+id = "mm5.player"
+addr = 0xDEB1
+length = 8
+crc32 = 0x9ABB5DF4
+
+[[mod_function_hook]]
+id = "mm5.proto.controller"
+addr = 0x8000
+length = 8
+crc32 = 0x5043B3B9
+
+[[mod_function_hook]]
+id = "mm5.proto.shot"
+addr = 0x918B
+length = 8
+crc32 = 0x55C5CF11
+
+[[mod_function_hook]]
+id = "mm5.proto.muzzle"
+addr = 0x922D
+length = 8
+crc32 = 0xC3FECEAA
+
+[[mod_function_hook]]
+id = "mm5.proto.damage"
+addr = 0x82D6
+length = 8
+crc32 = 0x6B631E76
+
+[[mod_function_hook]]
+id = "mm5.proto.shield"
+addr = 0xEF87
+length = 8
+crc32 = 0xC89665AD
+
+[[mod_function_hook]]
+id = "mm5.proto.reflected-damage"
+addr = 0x809D
+length = 8
+crc32 = 0xC66F74EB
+
+[[mod_function_hook]]
+id = "mm5.proto.reflected-damage-end"
+addr = 0x8225
+length = 8
+crc32 = 0x94CB1509
+
+[[mod_function_hook]]
+id = "mm5.proto.reflected-extent"
+addr = 0xF081
+length = 8
+crc32 = 0x0CC00881
+
+[[mod_function_hook]]
+id = "mm5.proto.reflected-extent-end"
+addr = 0xF0B0
+length = 8
+crc32 = 0x4C63F16C
+
+[[mod_function_hook]]
+id = "mm5.view.begin"
+addr = 0xDF5E
+length = 8
+crc32 = 0xEEF5EE0F
+
+[[mod_function_hook]]
+id = "mm5.view.part"
+addr = 0xE1F7
+length = 8
+crc32 = 0xC1DF4287
+
+[[mod_function_hook]]
+id = "mm5.view.dma"
+addr = 0xC049
+length = 8
+crc32 = 0x58D1D6C7

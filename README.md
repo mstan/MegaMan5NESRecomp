@@ -10,3 +10,7 @@ cmake --build build --config Release --parallel 2
 ```
 
 `NESRECOMP_ROOT` and `NESRECOMP_RECOMP_UI` can select existing engine and launcher checkouts. Runtime tests use isolated configuration and explicit ROM paths. The cartridge has native slide and charged-buster mechanics and uses MMC3 CHR-ROM banking.
+
+The development branch adds L/R selection of acquired weapons and helpers, plus an optional Proto Man character with Select teleport swapping. Proto Man defaults to two small Buster shots, double incoming damage and airborne front reflection; a normal-stat appearance mode remains available. Native movement, charge sizes, slide and weapon data remain cartridge-driven. His art is bundled with credits and rendered without modifying CHR-ROM.
+
+These controls have native/interpreter and current-build cold-state checks. Native inventory portraits and previews are implemented. Complete visual, stage, widescreen, co-op and netplay qualification remains in progress; this branch is not a finished parity release.

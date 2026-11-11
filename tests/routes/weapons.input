@@ -1,0 +1,59 @@
+# Native menus select Napalm Man. Unlock/energy fixtures do not equip weapons.
+300 START
+302 -
+600 START
+602 -
+900 START
+902 -
+1500 RIGHT
+1550 -
+1570 A
+1590 -
+1620 B
+1622 -
+2350 HOLD 05B8 FF
+# Retail new-game inventory has Buster and Rush Coil.
+2390 X1:R
+2391 X1:-
+2400 X1:R
+2401 X1:-
+2410 POKE 00B1-00BC 9C
+2410 POKE 00B1 80
+2450 X1:R
+2451 X1:-
+2460 X1:R
+2461 X1:-
+2470 X1:R
+2471 X1:-
+2480 X1:R
+2481 X1:-
+2490 X1:R
+2491 X1:-
+2500 X1:R
+2501 X1:-
+2510 X1:R
+2511 X1:-
+2520 X1:R
+2521 X1:-
+2530 X1:R
+2531 X1:-
+2540 X1:R
+2541 X1:-
+2550 X1:R
+2551 X1:-
+2560 X1:R
+2561 X1:-
+2570 X1:R
+2571 X1:-
+# A held shoulder triggers once; the following simultaneous pair does nothing.
+2590 X1:L
+2610 X1:-
+2620 X1:L+R
+2621 X1:-
+2650 START
+2651 -
+2700 X1:R
+2701 X1:-
+2750 START
+2751 -
+2850 -

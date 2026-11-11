@@ -1,0 +1,23 @@
+format_version = 1
+id = "mega-man-5-usa.enhancement.weapons"
+version = "1.0.0"
+name = "Quick weapon switching"
+author = "NESRecomp"
+description = "L selects the previous acquired weapon or helper; R selects the next. Wraps around and preserves energy, using the original game's equipment graphics and colors."
+license = "PolyForm-Noncommercial-1.0.0"
+resolver = "declarative"
+save_compatibility = "requires-same-mods"
+
+[[target]]
+game_id = "mega-man-5-usa"
+rom_crc32 = "3edcf7e8"
+
+[[feature]]
+id = "weapons"
+name = "Quick weapon switching"
+group = "Gameplay"
+default_enabled = true
+
+[[plugin]]
+feature = "weapons"
+id = "mega-man-5-usa.weapons"
