@@ -25,6 +25,7 @@ static ProtoState S;
 
 static int selected(void) { return s_on && S.selected; }
 int mm5_proto_selected(void) { return selected(); }
+int mm5_proto_swapping(void) { return s_on && S.teleport; }
 int mm5_proto_active(void) { return s_on && (S.selected || S.teleport); }
 const CycProtoAtlas *mm5_proto_atlas(void) { return s_loaded ? &s_atlas : NULL; }
 static int safe(void) {

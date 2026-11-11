@@ -1,0 +1,22 @@
+# Native Napalm traversal. Invulnerability keeps this camera/activation
+# fixture running; enemies still execute their original AI and collisions.
+300 START
+302 -
+600 START
+602 -
+900 START
+902 -
+1500 RIGHT
+1550 -
+1570 A
+1590 -
+1620 B
+1622 -
+2350 HOLD 05B8 FF
+2400 RIGHT
+2560 RIGHT+A
+2580 RIGHT
+2670 -
+2800 LEFT
+2890 -
+3000 -

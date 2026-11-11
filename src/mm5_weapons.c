@@ -1,5 +1,7 @@
 /* Optional L/R actions use native equipment tables from the loaded cartridge. */
 #include "mm5_weapons.h"
+#include "mm5_cart.h"
+#include "mm5_proto.h"
 #include "cyc_input.h"
 #include "cyc_mod.h"
 #include "logical_input.h"
@@ -11,7 +13,6 @@
 #include <string.h>
 
 static int s_on;
-static uint8_t *s_rom;
 typedef struct {
     char magic[4];
     uint8_t enabled, previous, pending, reserved;
@@ -22,22 +23,15 @@ static WeaponState W;
 #define WRITE(a,v) cyc_mod_poke((uint16_t)(a),(uint8_t)(v))
 
 static int cartridge(void) {
-    if (s_rom) return 1;
-    size_t size = cyc_mod_copy_cart_payload(NULL, 0);
-    if (size != 524288) return 0;
-    uint8_t *bytes = (uint8_t *)malloc(size);
-    if (!bytes) return 0;
-    if (cyc_mod_copy_cart_payload(bytes, size) != size) { free(bytes); return 0; }
-    s_rom = bytes;
-    return 1;
+    return mm5_cart_ready();
 }
 static uint8_t source(int bank, int address) {
-    return s_rom[(size_t)bank * 8192 + (address & 8191)];
+    return mm5_cart_prg(bank, address);
 }
 static int safe(void) {
     /* $28 retains 1/2 during normal horizontal scrolling, including rest.
      * Its vertical transition directions are 4/8. */
-    return READ(0x26) < 16 && READ(0x30) <= 3 && (READ(0xB0) & 31) &&
+    return !mm5_proto_swapping() && READ(0x26) < 16 && READ(0x30) <= 3 && (READ(0xB0) & 31) &&
         !READ(0x54) && !READ(0x59) && !READ(0x1B) && READ(0x28) < 4 && !READ(0x5A) &&
         !READ(0x390);
 }
@@ -51,7 +45,6 @@ void mm5_weapons_set(int enabled) {
 }
 void mm5_weapons_power(void) {
     memset(&W, 0, sizeof W);
-    free(s_rom); s_rom = NULL;
 }
 void mm5_weapons_input(void) {
     unsigned held = nes_input_game_buttons(1) & (CYC_GAME_L | CYC_GAME_R);

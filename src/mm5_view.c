@@ -1,5 +1,7 @@
 /* Replace player-owned OAM with immutable art; CHR-ROM and guest timing stay native. */
 #include "mm5_proto.h"
+#include "mm5_world.h"
+#include "mm5_wide.h"
 #include "cyc_mod.h"
 #include "cyc_render.h"
 #include "mod_function_hooks.h"
@@ -12,13 +14,14 @@ typedef struct {
     Mm5ProtoBody body;
 } ViewFrame;
 static ViewFrame s_build, s_frame;
-static int s_enabled;
+static int s_enabled, s_wide;
 static uint32_t s_bg[256 * 240];
-static uint8_t s_opaque[256 * 240], s_allowed[64][240];
+static uint8_t s_opaque[864 * 240], s_allowed[64][240];
 
 static int begin(uint16_t address) {
     (void)address;
     memset(&s_build, 0, sizeof s_build); memset(s_build.owners, 255, sizeof s_build.owners);
+    mm5_wide_begin();
     return 0;
 }
 static int part(uint16_t address) {
@@ -32,18 +35,8 @@ static int part(uint16_t address) {
 static int dma(uint16_t address) {
     (void)address;
     memcpy(&s_frame, &s_build, sizeof s_frame);
+    mm5_wide_latch();
     return 0;
-}
-static int background_pixel(int x, int y) {
-    if (!(cyc_render_line_mask(y) & 8) || (x < 8 && !(cyc_render_line_mask(y) & 2))) return 0;
-    int sx = cyc_render_line_scroll_x(y) + x, sy = cyc_render_line_scroll_y(y);
-    sx &= 511; sy %= 480;
-    int nx = sx / 256, ny = sy / 240, tx = (sx & 255) / 8, ty = (sy % 240) / 8;
-    uint16_t nt = (uint16_t)(0x2000 + nx * 1024 + ny * 2048);
-    int tile = cyc_render_nametable((uint16_t)(nt + ty * 32 + tx));
-    uint16_t a = (uint16_t)(cyc_render_line_bg_table(y) + tile * 16 + (sy % 240) % 8);
-    int bit = 7 - (sx & 7);
-    return ((cyc_render_chr(a) >> bit) & 1) | (((cyc_render_chr(a + 8) >> bit) & 1) << 1);
 }
 static uint32_t color(int index, const Mm5ProtoBody *body) {
     const CycProtoAtlas *atlas = mm5_proto_atlas();
@@ -67,9 +60,9 @@ static void character_body(uint32_t *out, int W, int origin, const Mm5ProtoBody 
         if (!index) continue;
         int dx = x - p->origin_x, dy = y + p->top_y;
         int px = b->x + (b->right ? -dx - 1 : dx), py = b->y + (b->flipped ? -dy : dy + 1);
-        if (px < 0 || px >= 256 || py < 0 || py >= 240 ||
+        if (origin + px < 0 || origin + px >= W || py < 0 || py >= 240 ||
             !(cyc_render_line_mask(py) & 16) || (px < 8 && !(cyc_render_line_mask(py) & 4)) ||
-            (b->behind && s_opaque[py * 256 + px])) continue;
+            (b->behind && s_opaque[py * W + origin + px])) continue;
         out[py * W + origin + px] = color(index, b);
     }
 }
@@ -124,26 +117,33 @@ static void sprite(uint32_t *out, int W, int origin, int slot, const uint8_t *oa
         for (int x = 0; x < 8; ++x) {
             int px = o[3] + x, bit = (o[2] & 64) ? x : 7 - x;
             int v = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
-            if (!v || px >= 256 || (px < 8 && !(cyc_render_line_mask(py) & 4)) ||
-                ((o[2] & 32) && s_opaque[py * 256 + px])) continue;
+            if (!v || origin + px >= W || (px < 8 && !(cyc_render_line_mask(py) & 4)) ||
+                ((o[2] & 32) && s_opaque[py * W + origin + px])) continue;
             out[py * W + origin + px] = cyc_render_color(16 + (o[2] & 3) * 4 + v);
         }
     }
 }
 static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *native, void *ctx) {
     (void)ctx; (void)native_x0;
+    if (cyc_render_background(s_bg)) mm5_world_audit(s_bg);
     /* The inventory swaps to a pseudo-stage without rebuilding world OAM.
      * Never paint the last latched gameplay actor over its native panels. */
     if (s_enabled && cyc_mod_peek(0x26) == 16 && cyc_mod_peek(0x59)) return inventory(out, W, H, native);
     if (cyc_mod_peek(0x26) >= 16 || cyc_mod_peek(0x59) || cyc_mod_peek(0x1B)) return 0;
-    if (!s_enabled || !s_frame.valid || !s_frame.body.active || W < 256 || H != 240 ||
+    if (!(s_enabled || s_wide) || W < 256 || W > 864 || H != 240 ||
         !cyc_render_background(s_bg)) return 0;
     int origin = (W - 256) / 2;
-    for (int i = 0; i < W * H; ++i) out[i] = 0xFF000000u;
-    for (int y = 0; y < H; ++y) {
-        memcpy(out + y * W + origin, s_bg + y * 256, 256 * sizeof *out);
-        for (int x = 0; x < 256; ++x) s_opaque[y * 256 + x] = (uint8_t)(background_pixel(x, y) != 0);
+    int wide = mm5_wide_background(out, W, H, s_bg, s_opaque, &origin);
+    int replace = s_enabled && s_frame.valid && s_frame.body.active;
+    if (!wide) {
+        if (!replace) return 0;
+        memset(s_opaque, 0, sizeof s_opaque);
+        for (int i = 0; i < W * H; ++i) out[i] = 0xFF000000u;
+        for (int y = 0; y < H; ++y) memcpy(out + y * W + origin, s_bg + y * 256, 256 * sizeof *out);
     }
+    const uint8_t *native_opaque = cyc_frame_bg_opaque();
+    for (int y = 0; y < H; ++y) for (int x = 0; x < 256; ++x)
+        if (origin+x>=0 && origin+x<W) s_opaque[y*W+origin+x]=native_opaque[y*256+x];
     const uint8_t *oam = cyc_render_oam();
     uint8_t counts[240] = {0};
     memset(s_allowed, 0, sizeof s_allowed);
@@ -153,9 +153,15 @@ static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *na
         for (int y = top; y < top + height && y < 240; ++y) s_allowed[slot][y] = counts[y]++ < 8;
         if (s_frame.owners[slot] == 0 && slot < first) first = slot;
     }
-    for (int slot = 63; slot >= 0; --slot) {
-        if (s_frame.owners[slot] == 0) { if (slot == first) character_body(out, W, origin, &s_frame.body); }
-        else sprite(out, W, origin, slot, oam);
+    cyc_render_set_native_origin(origin);
+    for (int rank = wide ? 255 : 0; rank >= 0; --rank) {
+        for (int slot = 63; slot >= 0; --slot) {
+            int owner = s_frame.owners[slot];
+            if (wide && (owner == 255 ? 0 : mm5_wide_rank(owner)) != rank) continue;
+            if (replace && owner == 0) { if (slot == first) character_body(out, W, origin, &s_frame.body); }
+            else sprite(out, W, origin, slot, oam);
+        }
+        if (wide) mm5_wide_draw(out, W, s_opaque, rank);
     }
     cyc_render_set_native_origin(origin); return 1;
 }
@@ -163,15 +169,17 @@ void mm5_view_power(void) {
     memset(&s_build, 0, sizeof s_build); memset(s_build.owners, 255, sizeof s_build.owners);
     memset(&s_frame, 0, sizeof s_frame); memset(s_frame.owners, 255, sizeof s_frame.owners);
 }
-void mm5_view_enable(int enabled) {
-    s_enabled = enabled != 0;
-    nes_mod_set_function_hook_enabled("mm5.view.begin", s_enabled);
-    nes_mod_set_function_hook_enabled("mm5.view.part", s_enabled);
-    nes_mod_set_function_hook_enabled("mm5.view.dma", s_enabled);
-    cyc_render_set_compositor(s_enabled ? render : NULL, NULL);
+static void refresh(void) {
+    int active = s_enabled || s_wide;
+    nes_mod_set_function_hook_enabled("mm5.view.begin", active);
+    nes_mod_set_function_hook_enabled("mm5.view.part", active);
+    nes_mod_set_function_hook_enabled("mm5.view.dma", active);
+    cyc_render_set_compositor(active ? render : NULL, NULL);
     cyc_render_set_stock_compositing(s_enabled != 0);
-    cyc_render_capture_background(s_enabled != 0);
+    cyc_render_capture_background(active != 0);
 }
+void mm5_view_enable(int enabled) { s_enabled = enabled != 0; refresh(); }
+void mm5_view_wide(int enabled) { s_wide = enabled != 0; refresh(); }
 static int get(uint8_t *out, int cap) {
     if (cap < sizeof s_frame + sizeof s_build) return -1;
     memcpy(s_build.magic, "MV01", 4); memcpy(s_frame.magic, "MV01", 4);
@@ -179,7 +187,7 @@ static int get(uint8_t *out, int cap) {
     return sizeof s_build + sizeof s_frame;
 }
 static int valid(const uint8_t *in, int len) {
-    if (!len) return !s_enabled;
+    if (!len) return !(s_enabled || s_wide);
     if (!in || len != sizeof s_build + sizeof s_frame) return 0;
     ViewFrame frames[2]; memcpy(frames, in, sizeof frames);
     for (int i = 0; i < 2; ++i) {

@@ -81,3 +81,15 @@ id = "mm5.view.dma"
 addr = 0xC049
 length = 8
 crc32 = 0x58D1D6C7
+
+[[mod_function_hook]]
+id = "mm5.wide.actor"
+addr = 0xDFC3
+length = 8
+crc32 = 0xA33F766E
+
+[[mod_function_hook]]
+id = "mm5.wide.spawn"
+addr = 0xDED4
+length = 8
+crc32 = 0x80C59164
