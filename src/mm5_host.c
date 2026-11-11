@@ -23,9 +23,10 @@ static void timing(unsigned lines) {
     nes_mod_set_local_only("MM5 CPU budget (unqualified netplay)",lines!=0);
 }
 static void activate_slowdown(void) {timing(262);}
+static void activate_noflicker(void) {mm5_no_flicker_set(1);}
 static void loaded(void *ctx) {(void)ctx;timing(s_extra_lines);}
 
-static void reset(void) { mm5_coop_set(0,s_coop_roster);mm5_weapons_set(0);s_proto_on=0;mm5_proto_set(0,s_proto_mode,s_proto_start);mm5_wide_set(0,"fit");timing(0); }
+static void reset(void) { mm5_coop_set(0,s_coop_roster);mm5_weapons_set(0);s_proto_on=0;mm5_proto_set(0,s_proto_mode,s_proto_start);mm5_wide_set(0,"fit");mm5_no_flicker_set(0);timing(0); }
 static void activate_wide(void) {
     char aspect[24]="fit";
     nes_mod_option_value("mega-man-5-usa.enhancement.widescreen","widescreen","aspect",aspect,sizeof aspect);
@@ -51,6 +52,7 @@ NES_MOD_CONSTRUCTOR(register_mm5) {
     nes_mod_register_activation_plugin("mega-man-5-usa.protoman", activate_proto);
     nes_mod_register_activation_plugin("mega-man-5-usa.widescreen", activate_wide);
     nes_mod_register_activation_plugin("mega-man-5-usa.slowdown", activate_slowdown);
+    nes_mod_register_activation_plugin("mega-man-5-usa.noflicker", activate_noflicker);
 }
 static void power(void *ctx) { (void)ctx; mm5_cart_power();mm5_coop_power();mm5_weapons_power();mm5_proto_power();mm5_wide_power();timing(s_extra_lines); }
 static void input(void *ctx, uint8_t buttons[2]) { (void)ctx;mm5_coop_input(buttons);mm5_weapons_input(); }
@@ -80,6 +82,10 @@ static bool option(void *ctx, const char *name, const char *value) {
     if(!strcmp(name,"--slowdown-reduction")) {
         if(strcmp(value,"on") && strcmp(value,"off"))return false;
         timing(!strcmp(value,"on")?262:0);return true;
+    }
+    if(!strcmp(name,"--no-flicker")) {
+        if(strcmp(value,"on") && strcmp(value,"off"))return false;
+        mm5_no_flicker_set(!strcmp(value,"on"));return true;
     }
     if (!strcmp(name, "--world-audit")) return mm5_world_audit_file(value);
     if (!strcmp(name, "--widescreen")) {
@@ -127,10 +133,11 @@ const CycHostExtras *cyc_host_extras(void) {
         {"--coop-roster", true, "megaman|protoman: character assigned to player one"},
         {"--coop-test-poke", true, "FRAME:SEAT:ADDR:BYTE: scheduled personal RAM fixture (seat0 or1)"},
         {"--slowdown-reduction", true, "on|off: extra game CPU time; off restores stock timing"},
+        {"--no-flicker", true, "on|off: retain complete actors beyond scanline and OAM limits"},
     };
     static const CycHostExtras extras = {
         .power_on = power, .state_loaded = loaded, .input = input, .frame_end = end, .tcp_setup = tcp,
-        .option = option, .options = options, .option_count = 11, .input_profile = &profile,
+        .option = option, .options = options, .option_count = 12, .input_profile = &profile,
     };
     return &extras;
 }
