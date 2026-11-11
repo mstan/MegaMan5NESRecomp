@@ -1,0 +1,4 @@
+[game]
+name = "Mega Man 5"
+output_prefix = "mega-man-5"
+console = "nes"
