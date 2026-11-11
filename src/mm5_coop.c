@@ -502,11 +502,12 @@ static void outro_tick(void) {
     if(!C.initialized || C.menu || C.wiping || C.scene_active || C.follow || R(0x26)!=C.stage)return;
     int state=R(0x30);if(!C.outro && state!=0x0F && state!=0x10)return;
     int seat=C.anchor^1;Player *p=&C.player[seat];
-    if(p->dead || (C.withdrawn&(1u<<seat)))return;
     if(!C.outro) {
         for(int base=0x300;base<=0x5B8;base+=24)for(int slot=1;slot<8;slot++)set_personal(p,base+slot,0);
         C.outro=1;reset_select();
     }
+    /* The native departure owns the camera even with only one survivor. */
+    if(p->dead || (C.withdrawn&(1u<<seat)))return;
     /* Only body/script state follows the native departure. Health, selected
      * weapon, energy, character colors and shared progression keep owners. */
     for(int base=0x300;base<=0x5B8;base+=24)set_personal(p,base,R(base));
