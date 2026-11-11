@@ -17,6 +17,7 @@ static ViewFrame s_build, s_frame;
 static int s_enabled, s_wide;
 static uint32_t s_bg[256 * 240];
 static uint8_t s_opaque[864 * 240], s_allowed[64][240];
+static uint8_t s_claimed[864 * 240];
 
 static int begin(uint16_t address) {
     (void)address;
@@ -62,8 +63,10 @@ static void character_body(uint32_t *out, int W, int origin, const Mm5ProtoBody 
         int px = b->x + (b->right ? -dx - 1 : dx), py = b->y + (b->flipped ? -dy : dy + 1);
         if (origin + px < 0 || origin + px >= W || py < 0 || py >= 240 ||
             !(cyc_render_line_mask(py) & 16) || (px < 8 && !(cyc_render_line_mask(py) & 4)) ||
-            (b->behind && s_opaque[py * W + origin + px])) continue;
-        out[py * W + origin + px] = color(index, b);
+            s_claimed[py * W + origin + px]) continue;
+        int at = py * W + origin + px;
+        s_claimed[at] = 1;
+        if (!b->behind || !s_opaque[at]) out[at] = color(index, b);
     }
 }
 static uint32_t menu_color(uint32_t c) {
@@ -117,9 +120,11 @@ static void sprite(uint32_t *out, int W, int origin, int slot, const uint8_t *oa
         for (int x = 0; x < 8; ++x) {
             int px = o[3] + x, bit = (o[2] & 64) ? x : 7 - x;
             int v = ((lo >> bit) & 1) | (((hi >> bit) & 1) << 1);
-            if (!v || origin + px >= W || (px < 8 && !(cyc_render_line_mask(py) & 4)) ||
-                ((o[2] & 32) && s_opaque[py * W + origin + px])) continue;
-            out[py * W + origin + px] = cyc_render_color(16 + (o[2] & 3) * 4 + v);
+            if (!v || origin + px >= W || (px < 8 && !(cyc_render_line_mask(py) & 4))) continue;
+            int at = py * W + origin + px;
+            if (s_claimed[at]) continue;
+            s_claimed[at] = 1;
+            if (!(o[2] & 32) || !s_opaque[at]) out[at] = cyc_render_color(16 + (o[2] & 3) * 4 + v);
         }
     }
 }
@@ -154,14 +159,17 @@ static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *na
         if (s_frame.owners[slot] == 0 && slot < first) first = slot;
     }
     cyc_render_set_native_origin(origin);
-    for (int rank = wide ? 255 : 0; rank >= 0; --rank) {
-        for (int slot = 63; slot >= 0; --slot) {
+    memset(s_claimed, 0, (size_t)W * H);
+    /* An opaque higher-priority sprite claims its pixel even behind terrain.
+     * Otherwise a lower-priority foreground sprite can leak through it. */
+    for (int rank = 0; rank <= (wide ? 255 : 0); ++rank) {
+        for (int slot = 0; slot < 64; ++slot) {
             int owner = s_frame.owners[slot];
             if (wide && (owner == 255 ? 0 : mm5_wide_rank(owner)) != rank) continue;
             if (replace && owner == 0) { if (slot == first) character_body(out, W, origin, &s_frame.body); }
             else sprite(out, W, origin, slot, oam);
         }
-        if (wide) mm5_wide_draw(out, W, s_opaque, rank);
+        if (wide) mm5_wide_draw(out, W, s_opaque, s_claimed, rank);
     }
     cyc_render_set_native_origin(origin); return 1;
 }

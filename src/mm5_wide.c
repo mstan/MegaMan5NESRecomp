@@ -64,6 +64,7 @@ static int actor(uint16_t address) {
     int wx=(R(0x348+slot)<<8)|R(0x330+slot), dx=wx-S.build.camera;
     if (!slot || !R(0x300+slot) || (dx>=32 && dx<224) || wx+32<S.build.left || wx-32>=S.build.left+S.build.width) return 0;
     if (!cyc_mod_isolate_begin()) { S.failed++; return 0; }
+    int saved_count=S.build.count;
     int camera=wx-128; P(0xFC,camera); P(0xF9,camera>>8); P(0x9E,slot); P(0x9F,4);
     for (int i=0;i<256;i+=4) P(0x200+i,248);
     /* Give the scratch renderer independent CHR ownership. Captured pattern
@@ -90,7 +91,7 @@ static int actor(uint16_t address) {
         }
     }
     cyc_mod_isolate_end();
-    if (!ok) { S.failed++; return 0; }
+    if (!ok) { S.build.count=(uint16_t)saved_count; S.failed++; return 0; }
     n=0; for (int base=0x300;base<=0x5B8;base+=0x18) P(base+slot,fields[n++]);
     S.rendered++; return 1;
 }
@@ -167,15 +168,18 @@ int mm5_wide_background(uint32_t *out,int width,int height,const uint32_t *nativ
     return 1;
 }
 int mm5_wide_rank(int owner) { return owner>=0 && owner<24 && S.frame.valid?S.frame.rank[owner]:255; }
-void mm5_wide_draw(uint32_t *out,int width,const uint8_t *opaque,int rank) {
+void mm5_wide_draw(uint32_t *out,int width,const uint8_t *opaque,uint8_t *claimed,int rank) {
     if (!s_on || !S.frame.valid || width<=256) return;
     int left=S.frame.camera-cyc_render_native_origin(width);
-    for (int i=S.frame.count-1;i>=0;i--) {
+    for (int i=0;i<S.frame.count;i++) {
         const WidePart *p=&S.frame.parts[i];if (mm5_wide_rank(p->owner)!=rank) continue;
         for (int y=0;y<8;y++) for (int x=0;x<8;x++) {
             int v=p->pixels[y*8+x],px=p->x-left+x,py=p->y+y;
-            if (!v || px<0 || px>=width || py<0 || py>=240 || ((p->attr&32)&&opaque[py*width+px])) continue;
-            out[py*width+px]=cyc_render_color(16+(p->attr&3)*4+v);
+            if (!v || px<0 || px>=width || py<0 || py>=240) continue;
+            int at=py*width+px;
+            if (claimed[at]) continue;
+            claimed[at]=1;
+            if (!(p->attr&32) || !opaque[at]) out[at]=cyc_render_color(16+(p->attr&3)*4+v);
         }
     }
 }

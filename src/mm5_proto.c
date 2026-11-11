@@ -1,6 +1,7 @@
 /* Native MM5 physics/charge/slide remain authoritative for either character. */
 #include "mm5_proto.h"
 #include "mm5_proto_sheet.h"
+#include "mm5_cart.h"
 #include "cyc_mod.h"
 #include "cyc_ring.h"
 #include "mod_runtime.h"
@@ -22,6 +23,18 @@ typedef struct {
     uint64_t switches, blocks, reflections, limited;
 } ProtoState;
 static ProtoState S;
+
+static uint8_t animation_byte(int bank, int address) {
+    return mm5_cart_prg(bank + (address >= 0xA000), address);
+}
+static int drawn_frame(void) {
+    if (!mm5_cart_ready()) return -1;
+    int bank = mm5_cart_prg(31, 0xE33B + R(0x300)), subtype = R(0x558);
+    if (bank >= 31) return -1;
+    int pointer = animation_byte(bank, 0x8600 + subtype) | (animation_byte(bank, 0x8700 + subtype) << 8);
+    if (pointer < 0x8000 || pointer >= 0xBFFE) return -1;
+    return animation_byte(bank, pointer + 2 + (R(0x540) & 0x7F));
+}
 
 static int selected(void) { return s_on && S.selected; }
 int mm5_proto_selected(void) { return selected(); }
@@ -162,12 +175,19 @@ void mm5_proto_body(Mm5ProtoBody *body) {
     int state = body->state, firing = R(0x34) != 0;
     int throwing = R(0x34) >= 2 && body->weapon != 0;
     int base = R(0x558) - R(0x34), phase = R(0x540) & 3;
+    int native_frame = drawn_frame();
     static const int run[] = {0, 1, 2, 1};
     if (S.teleport) {
         body->pose = CYC_PROTO_TELEPORT;
         body->y -= (S.teleport <= 16 ? S.teleport - 1 : 32 - S.teleport) * 16;
-    } else if (state == 8 || state == 0x10 || state == 0x15 || state == 0x16) body->pose = CYC_PROTO_TELEPORT;
-    else if (state == 6) body->pose = CYC_PROTO_HURT;
+    } else if (state == 8 || state == 0x10 || state == 0x15 || state == 0x16) {
+        body->pose = (uint8_t)(native_frame == 11 ? CYC_PROTO_TELEPORT_PARTIAL : native_frame == 12 ? CYC_PROTO_TELEPORT_FULL : CYC_PROTO_TELEPORT);
+    } else if (state == 6) {
+        /* MM5's native hurt frameset alternates body frame19 and sparks23.
+         * Preserve its actual effect rather than replacing sparks with a body. */
+        if (native_frame == 23) body->active = 0;
+        body->pose = CYC_PROTO_HURT;
+    }
     else if (state == 2) body->pose = CYC_PROTO_SLIDE;
     else if (state == 3) {
         body->pose = firing ? CYC_PROTO_LADDER_FIRE0 : base == 0x14 ? CYC_PROTO_LADDER_TOP0 : CYC_PROTO_LADDER0;
@@ -247,8 +267,9 @@ void mm5_proto_register(void) {
     mm5_view_register();
 }
 int mm5_proto_json(char *out, int cap) {
-    return snprintf(out, cap, "\"proto\":{\"on\":%d,\"mode\":%d,\"selected\":%u,\"teleport\":%u,\"switches\":%llu,\"blocks\":%llu,\"reflections\":%llu,\"limited\":%llu,\"shots\":[%u,%u,%u],\"shot_charge\":[%u,%u,%u],\"player\":[%u,%u,%u]}",
+    return snprintf(out, cap, "\"proto\":{\"on\":%d,\"mode\":%d,\"selected\":%u,\"teleport\":%u,\"switches\":%llu,\"blocks\":%llu,\"reflections\":%llu,\"limited\":%llu,\"shots\":[%u,%u,%u],\"shot_charge\":[%u,%u,%u],\"player\":[%u,%u,%u],\"animation\":[%u,%u,%u,%d]}",
         s_on, s_mode, S.selected, S.teleport, (unsigned long long)S.switches, (unsigned long long)S.blocks,
         (unsigned long long)S.reflections, (unsigned long long)S.limited,
-        R(0x301), R(0x302), R(0x303), R(0x469), R(0x46A), R(0x46B), R(0x330), R(0x378), R(0x5B8));
+        R(0x301), R(0x302), R(0x303), R(0x469), R(0x46A), R(0x46B), R(0x330), R(0x378), R(0x5B8),
+        R(0x558), R(0x540), R(0x570), drawn_frame());
 }
