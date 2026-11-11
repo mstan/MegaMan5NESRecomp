@@ -27,7 +27,7 @@ typedef struct {
     uint8_t raw[2],raw_previous[2],fresh[2];
     uint8_t ai_active,ai_actor,ai_common,ai_pad[2],wiping,retry;
     uint8_t withdrawn,select_hold[2],select_armed[2],checkpoint,revive_pending;
-    uint8_t scene_active,follow,section,scene_page,scene_vertical,scene_scroll_y;
+    uint8_t scene_active,follow,section,scene_page,scene_vertical,scene_scroll_y,outro;
     uint32_t last_step[2];
     Player player[2];Picture build,frame;
     uint64_t updates[2],world_updates,failures,hits[2],contacts[2],deaths[2],handoffs,wipes,targets[2],checks;
@@ -42,6 +42,7 @@ static int checkpoint_at(int screen);
 static void scene_tick(void);
 static void follow_arrivals(void);
 static void scene_shift(void);
+static void outro_tick(void);
 static void reset_select(void) {
     memset(C.select_hold,0,sizeof C.select_hold);memset(C.select_armed,0,sizeof C.select_armed);
 }
@@ -189,7 +190,7 @@ static void initialize(void) {
     }
     C.retry=C.wiping=0;
     C.withdrawn=C.revive_pending=0;C.checkpoint=(uint8_t)checkpoint_at(R(0x69));
-    C.scene_active=C.follow=C.scene_vertical=C.scene_scroll_y=0;C.section=R(0x29)&31;C.scene_page=R(0xF9);
+    C.scene_active=C.follow=C.scene_vertical=C.scene_scroll_y=C.outro=0;C.section=R(0x29)&31;C.scene_page=R(0xF9);
     reset_select();
     int x=(R(0x348)<<8)|R(0x330);x=x>=32?x-16:x+16;
     set_personal(&C.player[1],0x330,x);set_personal(&C.player[1],0x348,x>>8);
@@ -242,7 +243,7 @@ static int ai_begin(uint16_t address) {
     if(actor<8 || actor>=24 || !R(0x300+actor))return 0;
     capture(&C.player[C.current]);
     int seat=C.anchor,ex=(R(0x348+actor)<<8)|R(0x330+actor),ey=R(0x378+actor);int64_t best=INT64_MAX;
-    for(int i=0;i<2;i++)if(!C.player[i].dead && C.player[i].teleport==TELE_NONE && !(C.withdrawn&(1u<<i)) && (personal(&C.player[i],0xB0)&31)) {
+    for(int i=0;!C.outro && i<2;i++)if(!C.player[i].dead && C.player[i].teleport==TELE_NONE && !(C.withdrawn&(1u<<i)) && (personal(&C.player[i],0xB0)&31)) {
         int dx=((personal(&C.player[i],0x348)<<8)|personal(&C.player[i],0x330))-ex;
         int dy=personal(&C.player[i],0x378)-ey;int64_t distance=(int64_t)dx*dx+(int64_t)dy*dy;
         if(distance<best){best=distance;seat=i;}
@@ -303,7 +304,7 @@ static int stage_load(uint16_t address) {
     (void)address;if(!s_on || cyc_mod_isolated())return 0;
     if(C.initialized) {
         capture(&C.player[C.current]);C.retry=(uint8_t)(C.wiping && C.stage==R(0x26));
-        C.initialized=C.ai_active=C.menu=C.scene_active=C.follow=0;C.current=C.anchor=0;C.pending_pause=255;
+        C.initialized=C.ai_active=C.menu=C.scene_active=C.follow=C.outro=0;C.current=C.anchor=0;C.pending_pause=255;
         memset(&C.build,0,sizeof C.build);memset(&C.frame,0,sizeof C.frame);
         mm5_hud_reset();
     }
@@ -419,7 +420,7 @@ static void scene_shift(void) {
     }
 }
 static int before_scroll(uint16_t address) {
-    if(!s_on || !C.initialized || C.menu || C.ai_active || C.wiping || C.scene_active || cyc_mod_isolated())return 0;
+    if(!s_on || !C.initialized || R(0x26)!=C.stage || C.menu || C.ai_active || C.wiping || C.scene_active || C.outro || cyc_mod_isolated())return 0;
     C.scene_vertical=(uint8_t)(address==0xCE82);C.scene_scroll_y=R(0xFA);scene_start();return 0;
 }
 /* Match C9DD's authored exit tests against the initiating body. The native
@@ -468,7 +469,7 @@ static int before_camera(uint16_t address) {
     return 0;
 }
 static void scene_tick(void) {
-    if(!C.initialized || C.menu || C.ai_active || C.wiping || R(0x26)!=C.stage)return;
+    if(!C.initialized || C.menu || C.ai_active || C.wiping || C.outro || R(0x26)!=C.stage)return;
     if(!C.scene_active && scene_changed()) {
         C.scene_vertical=(uint8_t)(R(0x28)>=4);C.scene_scroll_y=0;scene_start();
     }
@@ -487,7 +488,7 @@ static void follow_arrivals(void) {
     }
 }
 static int after_scroll(uint16_t address) {
-    (void)address;if(!s_on || !C.initialized || C.menu || C.ai_active || C.wiping || cyc_mod_isolated())return 0;
+    (void)address;if(!s_on || !C.initialized || R(0x26)!=C.stage || C.menu || C.ai_active || C.wiping || C.outro || cyc_mod_isolated())return 0;
     if(!C.scene_active && scene_changed()) {
         C.scene_vertical=(uint8_t)(R(0x28)>=4);C.scene_scroll_y=0;scene_start();
     }
@@ -496,6 +497,23 @@ static int after_scroll(uint16_t address) {
         capture(&C.player[C.anchor]);follow_arrivals();
     }
     return 0;
+}
+static void outro_tick(void) {
+    if(!C.initialized || C.menu || C.wiping || C.scene_active || C.follow || R(0x26)!=C.stage)return;
+    int state=R(0x30);if(!C.outro && state!=0x0F && state!=0x10)return;
+    int seat=C.anchor^1;Player *p=&C.player[seat];
+    if(p->dead || (C.withdrawn&(1u<<seat)))return;
+    if(!C.outro) {
+        for(int base=0x300;base<=0x5B8;base+=24)for(int slot=1;slot<8;slot++)set_personal(p,base+slot,0);
+        C.outro=1;reset_select();
+    }
+    /* Only body/script state follows the native departure. Health, selected
+     * weapon, energy, character colors and shared progression keep owners. */
+    for(int base=0x300;base<=0x5B8;base+=24)set_personal(p,base,R(base));
+    for(int a=0x30;a<=0x3F;a++)if(a!=0x32)set_personal(p,a,R(a));
+    int x=((R(0x348)<<8)|R(0x330))+24;
+    set_personal(p,0x330,x);set_personal(p,0x348,x>>8);
+    p->teleport=R(0x390)?TELE_HIDDEN:TELE_NONE;p->arrival_follow=0;p->previous=C.raw[seat];
 }
 static void select_tick(void) {
     int gameplay=!C.menu && !C.ai_active && !C.wiping && !C.scene_active && !C.follow && R(0x26)<16 && R(0x30)<=3 &&
@@ -522,7 +540,11 @@ static void select_tick(void) {
 }
 void mm5_coop_end(void) {
     if(!s_on)return;
-    if(C.initialized && !C.menu && R(0x26)<16){capture(&C.player[C.current]);deaths();scene_tick();follow_arrivals();select_tick();}
+    if(C.initialized && !C.menu && R(0x26)!=C.stage) {
+        C.initialized=C.scene_active=C.follow=C.outro=0;C.current=C.anchor=0;C.pending_pause=255;
+        memset(&C.build,0,sizeof C.build);memset(&C.frame,0,sizeof C.frame);mm5_hud_reset();
+    }
+    if(C.initialized && !C.menu && R(0x26)<16){capture(&C.player[C.current]);deaths();scene_tick();follow_arrivals();select_tick();outro_tick();}
     for(int seat=0;seat<2;seat++)C.player[seat].previous=C.raw[seat];
 }
 static uint8_t pattern(const uint8_t banks[6],int address) {
@@ -535,6 +557,7 @@ static uint8_t pattern(const uint8_t banks[6],int address) {
 void mm5_coop_build(void) {
     memset(&C.build,0,sizeof C.build);
     if(!s_on || !C.initialized || C.menu || R(0x26)>=16)return;
+    outro_tick();
     if(!mm5_hud_capture())C.failures++;
     int seat=C.current^1,owner=C.current;
     scene_shift();
@@ -593,11 +616,11 @@ void mm5_coop_set(int enabled,int roster) {
     for(int i=0;i<sizeof HOOKS/sizeof *HOOKS;i++)nes_mod_set_function_hook_enabled(HOOKS[i],s_on);
     nes_mod_set_local_only("MM5 personal co-op (unqualified netplay)",s_on);mm5_view_coop(s_on);
 }
-static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC06",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;memcpy(out,&C,sizeof C);return sizeof C;}
+static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC07",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;memcpy(out,&C,sizeof C);return sizeof C;}
 static int valid(const uint8_t *in,int len) {
     if(!len)return !s_on;if(!in || len!=sizeof C)return 0;
     static Coop p;memcpy(&p,in,sizeof p);
-    if(memcmp(p.magic,"MC06",4)||p.enabled!=s_on||p.roster!=s_roster||p.initialized>1||p.anchor>1||p.current>1||p.menu>1||p.pauser>1||p.ai_active>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
+    if(memcmp(p.magic,"MC07",4)||p.enabled!=s_on||p.roster!=s_roster||p.initialized>1||p.anchor>1||p.current>1||p.menu>1||p.pauser>1||p.ai_active>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.outro>1||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
     for(int seat=0;seat<2;seat++)if(p.select_hold[seat]>90 || p.select_armed[seat]>1)return 0;
     for(int seat=0;seat<2;seat++)if(p.player[seat].arrival_follow>1 || p.player[seat].entry_state>3)return 0;
     const Picture *f[2]={&p.build,&p.frame};
@@ -626,7 +649,7 @@ void mm5_coop_register(void) {
     nes_mod_register_savestate_hook("mm5.coop",get,set);nes_mod_register_savestate_validator("mm5.coop",valid);
 }
 int mm5_coop_json(char *out,int cap) {
-    return snprintf(out,cap,"\"coop\":{\"on\":%d,\"ready\":%u,\"anchor\":%u,\"menu\":%u,\"pauser\":%u,\"world\":%llu,\"updates\":[%llu,%llu],\"failed\":%llu,\"combat\":[[%llu,%llu],[%llu,%llu]],\"deaths\":[%llu,%llu],\"handoffs\":%llu,\"wipes\":%llu,\"targets\":[%llu,%llu],\"checks\":%llu,\"shots\":[[%d,%d,%d],[%d,%d,%d]],\"transport\":[%u,%u,%u,%u,%u],\"withdrawals\":[%llu,%llu],\"rejoins\":[%llu,%llu],\"revivals\":[%llu,%llu],\"scene\":[%u,%u,%u,%u],\"transitions\":%llu,\"arrivals\":[%llu,%llu],\"pages\":[%d,%d],\"lives\":%u,\"tanks\":[%u,%u],\"coil\":[%d,%d],\"actor8\":[%u,%u,%u,%u,%u],\"players\":[[%d,%d,%d,%d,%d],[%d,%d,%d,%d,%d]]}",
+    return snprintf(out,cap,"\"coop\":{\"on\":%d,\"ready\":%u,\"anchor\":%u,\"menu\":%u,\"pauser\":%u,\"world\":%llu,\"updates\":[%llu,%llu],\"failed\":%llu,\"combat\":[[%llu,%llu],[%llu,%llu]],\"deaths\":[%llu,%llu],\"handoffs\":%llu,\"wipes\":%llu,\"targets\":[%llu,%llu],\"checks\":%llu,\"shots\":[[%d,%d,%d],[%d,%d,%d]],\"transport\":[%u,%u,%u,%u,%u],\"withdrawals\":[%llu,%llu],\"rejoins\":[%llu,%llu],\"revivals\":[%llu,%llu],\"scene\":[%u,%u,%u,%u],\"transitions\":%llu,\"outro\":%u,\"arrivals\":[%llu,%llu],\"pages\":[%d,%d],\"boss\":[%u,%u,%u],\"progress\":[%u,%u,%u,%u,%u],\"lives\":%u,\"tanks\":[%u,%u],\"coil\":[%d,%d],\"napalm\":[%d,%d],\"actor8\":[%u,%u,%u,%u,%u],\"players\":[[%d,%d,%d,%d,%d],[%d,%d,%d,%d,%d]]}",
         s_on,C.initialized,C.anchor,C.menu,C.pauser,(unsigned long long)C.world_updates,(unsigned long long)C.updates[0],(unsigned long long)C.updates[1],(unsigned long long)C.failures,
         (unsigned long long)C.hits[0],(unsigned long long)C.contacts[0],(unsigned long long)C.hits[1],(unsigned long long)C.contacts[1],
         (unsigned long long)C.deaths[0],(unsigned long long)C.deaths[1],(unsigned long long)C.handoffs,(unsigned long long)C.wipes,
@@ -635,9 +658,9 @@ int mm5_coop_json(char *out,int cap) {
         C.withdrawn,C.player[0].teleport,C.player[1].teleport,C.checkpoint,C.revive_pending,
         (unsigned long long)C.withdrawals[0],(unsigned long long)C.withdrawals[1],(unsigned long long)C.rejoins[0],(unsigned long long)C.rejoins[1],
         (unsigned long long)C.revivals[0],(unsigned long long)C.revivals[1],
-        C.scene_active,C.follow,C.section,C.scene_page,(unsigned long long)C.transitions,(unsigned long long)C.arrivals[0],(unsigned long long)C.arrivals[1],
+        C.scene_active,C.follow,C.section,C.scene_page,(unsigned long long)C.transitions,C.outro,(unsigned long long)C.arrivals[0],(unsigned long long)C.arrivals[1],
         personal(&C.player[0],0x348),personal(&C.player[1],0x348),
-        R(0xBF),R(0xBD)&15,R(0xBE)&15,mm5_coop_read(0,0xBA)&31,mm5_coop_read(1,0xBA)&31,R(0x308),R(0x458),R(0x338),R(0x380),R(0x428),
+        R(0x56),R(0x56)<24?R(0x300+R(0x56)):0,R(0x56)<24?R(0x450+R(0x56)):0,R(0x69),R(0x6E),R(0x6F),R(0x2F),R(0x22),R(0xBF),R(0xBD)&15,R(0xBE)&15,mm5_coop_read(0,0xBA)&31,mm5_coop_read(1,0xBA)&31,mm5_coop_read(0,0xB4),mm5_coop_read(1,0xB4),R(0x308),R(0x458),R(0x338),R(0x380),R(0x428),
         personal(&C.player[0],0x330),personal(&C.player[0],0x378),personal(&C.player[0],0xB0)&31,personal(&C.player[0],0x32),personal(&C.player[0],0x30),
         personal(&C.player[1],0x330),personal(&C.player[1],0x378),personal(&C.player[1],0xB0)&31,personal(&C.player[1],0x32),personal(&C.player[1],0x30));
 }

@@ -19,7 +19,9 @@ enum { MAX_PARTS = 24 * 63 };
 typedef struct { int16_t x,y; uint8_t owner,attr,pixels[64]; } WidePart;
 typedef struct {
     uint8_t valid,rank[24],next_rank,extended;
-    uint16_t count,width,camera,left,room_left,room_right;
+    uint16_t count,width,camera;
+    int16_t left;
+    uint16_t room_left,room_right;
     Mm5ProtoBody body;
     WidePart parts[MAX_PARTS];
 } WideFrame;
@@ -35,9 +37,10 @@ static int geometry(int width, int *camera, int *left, int *lo, int *hi) {
     if (!s_on || width <= 256 || width > CYC_VIDEO_MAX_WIDTH || R(0x26) >= 16 || R(0x59) || R(0x1B) ||
         !(R(0x29) & 32) || R(0xFA)) return 0;
     int page = R(0xF9), start = page - R(0x2B);
-    if (start < 0 || R(0x2A) > 31) return 0;
+    if (page>=0x4F || start < 0 || R(0x2A) > 31) return 0;
     *camera = page * 256 + R(0xFC); *lo = start * 256; *hi = (start + R(0x2A) + 1) * 256;
     *left = *camera - (width - 256) / 2;
+    if(*hi-*lo<width){*left=*lo-(width-(*hi-*lo))/2;return 1;}
     if (*left < *lo) *left = *lo;
     if (*hi - *lo >= width && *left + width > *hi) *left = *hi - width;
     return 1;
@@ -52,7 +55,7 @@ void mm5_wide_begin(void) {
     }
     S.build.valid=1; S.build.width=(uint16_t)width; S.build.camera=(uint16_t)camera;
     S.build.extended=(uint8_t)extended;
-    S.build.left=(uint16_t)left; S.build.room_left=(uint16_t)lo; S.build.room_right=(uint16_t)hi;
+    S.build.left=(int16_t)left; S.build.room_left=(uint16_t)lo; S.build.room_right=(uint16_t)hi;
 }
 void mm5_wide_latch(void) { S.frame=S.build; }
 static uint8_t pattern(const uint8_t banks[6], int address) {

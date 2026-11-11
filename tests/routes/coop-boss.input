@@ -1,0 +1,89 @@
+# Reach the real second checkpoint, then use a native full-wipe retry to
+# initialize its authored corridor/background before crossing the boss door.
+# No checkpoint, boss-success, health-zero or stage-clear flag is written.
+300 START
+302 -
+600 START
+602 -
+900 START
+902 -
+1500 RIGHT
+1550 -
+1570 A
+1590 -
+1620 B
+1622 -
+2350 HOLD 0308-0317 00
+2400 POKE 0030 00
+2400 POKE 0330 80
+2400 POKE 0348 1B
+2400 POKE 0378 B4
+2400 POKE 0390 00
+2400 POKE 0029 2D
+2400 POKE 002A 00
+2400 POKE 002B 00
+2400 POKE 0028 01
+2400 POKE 00FC 00
+2400 POKE 00F9 1B
+2600 POKE 0030 01
+2600 POKE 0378 08
+2600 POKE 0390 01
+2600 POKE 0360 00
+2600 POKE 03D8 00
+2600 POKE 03F0 00
+2700 POKE 0030 01
+2700 POKE 0378 08
+2700 POKE 0390 01
+2700 POKE 0360 00
+2700 POKE 03D8 00
+2700 POKE 03F0 00
+3750 UNHOLD 0308-0317
+3800 RIGHT
+4300 -
+# Hold body positions for a focused native boss-hit check after the real intro.
+# Boss health, immunity and success/progression remain cartridge-owned.
+4350 HOLD 0330 40
+4350 HOLD 0378 B4
+4350 HOLD 0030 00
+4350 HOLD 05B8 7F
+4350 HOLD 00B0 9C
+4350 HOLD 0338 C0
+4350 HOLD 0380 B0
+4350 HOLD 0398 00
+4350 HOLD 03F8 00
+4360 2:B
+4445 2:-
+# Continue with the farther second player firing while native AI targets P1.
+# Release the body holds before a kill can request the native clear script.
+4500 UNHOLD 0330
+4500 UNHOLD 0378
+4500 UNHOLD 0030
+4500 UNHOLD 05B8
+4500 UNHOLD 00B0
+4500 2:B
+4585 2:-
+4610 2:B
+4695 2:-
+4720 2:B
+4805 2:-
+4830 2:B
+4915 2:-
+4940 2:B
+5025 2:-
+5050 2:B
+5135 2:-
+5160 2:B
+5245 2:-
+5270 2:B
+5355 2:-
+5375 UNHOLD 0338
+5375 UNHOLD 0380
+5375 UNHOLD 0398
+5375 UNHOLD 03F8
+# Follow the native password -> stage-select path and enter the next choice.
+8600 START
+8601 -
+9000 UP
+9001 -
+9100 START
+9101 -
