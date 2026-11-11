@@ -2,6 +2,7 @@
 #include "mm5_proto.h"
 #include "mm5_proto_sheet.h"
 #include "mm5_cart.h"
+#include "mm5_coop.h"
 #include "cyc_mod.h"
 #include "cyc_ring.h"
 #include "mod_runtime.h"
@@ -22,7 +23,8 @@ typedef struct {
     uint8_t extent_active, extent_weapon, extent_charge;
     uint64_t switches, blocks, reflections, limited;
 } ProtoState;
-static ProtoState S;
+static ProtoState s_players[2];
+#define S (s_players[mm5_coop_seat()])
 
 static uint8_t animation_byte(int bank, int address) {
     return mm5_cart_prg(bank + (address >= 0xA000), address);
@@ -36,10 +38,11 @@ static int drawn_frame(void) {
     return animation_byte(bank, pointer + 2 + (R(0x540) & 0x7F));
 }
 
-static int selected(void) { return s_on && S.selected; }
+static int selected(void) { int character=mm5_coop_character();return s_on && (character>=0?character:S.selected); }
 int mm5_proto_selected(void) { return selected(); }
-int mm5_proto_swapping(void) { return s_on && S.teleport; }
-int mm5_proto_active(void) { return s_on && (S.selected || S.teleport); }
+int mm5_proto_swapping(void) { return s_on && !mm5_coop_enabled() && S.teleport; }
+int mm5_proto_active(void) { return selected() || mm5_proto_swapping(); }
+void mm5_proto_cancel_swap(void) { if(S.teleport){P(0x5B8,S.saved_stun);S.teleport=0;} }
 const CycProtoAtlas *mm5_proto_atlas(void) { return s_loaded ? &s_atlas : NULL; }
 static int safe(void) {
     int state = R(0x30);
@@ -57,7 +60,7 @@ static int shield_up(void) {
 }
 static int controller(uint16_t address) {
     (void)address;
-    if (!s_on || cyc_mod_isolated()) return 0;
+    if (!s_on || mm5_coop_enabled() || cyc_mod_isolated()) return 0;
     if (!S.teleport && (R(0x14) & 0x20) && safe()) {
         S.teleport = 1; S.saved_stun = R(0x5B8); S.switches++;
         P(0x38, 0); P(0x5B, 0); sound(0x35);
@@ -68,7 +71,7 @@ static int controller(uint16_t address) {
 }
 static int shot(uint16_t address) {
     (void)address;
-    if (!selected() || cyc_mod_isolated()) return 0;
+    if (!selected() || (cyc_mod_isolated() && !mm5_coop_native_scope())) return 0;
     CycModRegs regs; cyc_mod_regs(&regs);
     if (regs.y >= 1 && regs.y <= 3) S.reflected[regs.y - 1] = 0;
     /* MM5 begins release processing at $10 but keeps the small Buster tier
@@ -88,7 +91,7 @@ static int muzzle_y(void) {
 }
 static int muzzle(uint16_t address) {
     (void)address;
-    if (!selected() || cyc_mod_isolated()) return 0;
+    if (!selected() || (cyc_mod_isolated() && !mm5_coop_native_scope())) return 0;
     CycModRegs r; cyc_mod_regs(&r);
     int y = muzzle_y();
     if (r.y >= 1 && r.y <= 3 && y >= 0 && y < 240) P(0x378 + r.y, y);
@@ -96,7 +99,7 @@ static int muzzle(uint16_t address) {
 }
 static int damage(uint16_t address) {
     (void)address;
-    if (!selected() || !s_mode || S.teleport || cyc_mod_isolated()) return 0;
+    if (!selected() || !s_mode || S.teleport || (cyc_mod_isolated() && !mm5_coop_native_scope())) return 0;
     CycModRegs r; cyc_mod_regs(&r);
     int amount = R(0x85C3 + r.y);
     /* SEC has run. The native SBC and its death/immunity paths still decide. */
@@ -107,7 +110,7 @@ static int reflected_slot(int slot) {
     return slot >= 1 && slot <= 3 && S.reflected[slot - 1] && R(0x300 + slot) == 0x70;
 }
 static int reflected_damage(uint16_t address) {
-    if (cyc_mod_isolated()) return 0;
+    if (cyc_mod_isolated() && !mm5_coop_native_scope()) return 0;
     if (address == 0x809D) {
         if (!s_on || !reflected_slot(R(0x10))) return 0;
         S.damage_active = 1; S.damage_weapon = R(0x32); S.damage_charge = R(0x5B);
@@ -118,7 +121,7 @@ static int reflected_damage(uint16_t address) {
     return 0;
 }
 static int reflected_extent(uint16_t address) {
-    if (cyc_mod_isolated()) return 0;
+    if (cyc_mod_isolated() && !mm5_coop_native_scope()) return 0;
     if (address == 0xF081) {
         if (!s_on || !reflected_slot(R(0x02))) return 0;
         S.extent_active = 1; S.extent_weapon = R(0x32); S.extent_charge = R(0x5B);
@@ -176,6 +179,9 @@ void mm5_proto_body(Mm5ProtoBody *body) {
     int throwing = R(0x34) >= 2 && body->weapon != 0;
     int base = R(0x558) - R(0x34), phase = R(0x540) & 3;
     int native_frame = drawn_frame();
+    /* Frameset1A is the blinking READY word (frames39/40), owned by
+     * actor0 before its actual frameset13 arrival. It is native scene text. */
+    if(state==8 && base==0x1A) {body->active=0;return;}
     static const int run[] = {0, 1, 2, 1};
     if (S.teleport) {
         body->pose = CYC_PROTO_TELEPORT;
@@ -199,11 +205,13 @@ void mm5_proto_body(Mm5ProtoBody *body) {
     else body->pose = (uint8_t)(throwing ? CYC_PROTO_THROW_IDLE : firing ? CYC_PROTO_FIRE_IDLE0 : CYC_PROTO_IDLE0 + ((R(0x92) >> 3) & 3));
 }
 void mm5_proto_power(void) {
-    memset(&S, 0, sizeof S); S.selected = (uint8_t)s_start;
+    memset(s_players, 0, sizeof s_players); s_players[0].selected = (uint8_t)s_start;s_players[1].selected=(uint8_t)!s_start;
     mm5_view_power();
 }
 void mm5_proto_end(void) {
-    for (int slot = 1; slot <= 3; ++slot) if (R(0x300 + slot) != 0x70) S.reflected[slot - 1] = 0;
+    for(int seat=0;seat<(mm5_coop_enabled()?2:1);seat++)for(int slot=1;slot<=3;slot++)
+        if(mm5_coop_read(seat,(uint16_t)(0x300+slot))!=0x70)s_players[seat].reflected[slot-1]=0;
+    if(mm5_coop_enabled())return;
     if (!s_on || !S.teleport) return;
     if (S.teleport == 16) { S.selected ^= 1; sound(0x14); }
     if (++S.teleport > 32) { S.teleport = 0; P(0x5B8, S.saved_stun); }
@@ -236,21 +244,21 @@ bool mm5_proto_set(int enabled, int mode, int start) {
     mm5_view_enable(s_on); return true;
 }
 static int get(uint8_t *out, int cap) {
-    if (cap < sizeof S) return -1;
-    memcpy(S.magic, "MP01", 4); S.enabled = (uint8_t)s_on; S.mode = (uint8_t)s_mode;
-    memcpy(out, &S, sizeof S); return sizeof S;
+    if (cap < sizeof s_players) return -1;
+    for(int i=0;i<2;i++){memcpy(s_players[i].magic,"MP02",4);s_players[i].enabled=(uint8_t)s_on;s_players[i].mode=(uint8_t)s_mode;}
+    memcpy(out,s_players,sizeof s_players);return sizeof s_players;
 }
 static int valid(const uint8_t *in, int len) {
     if (!len) return !s_on;
-    if (!in || len != sizeof S) return 0;
-    ProtoState p; memcpy(&p, in, sizeof p);
-    return !memcmp(p.magic, "MP01", 4) && p.enabled == s_on && p.mode == s_mode && p.selected <= 1 && p.teleport <= 32 &&
-        p.damage_active <= 1 && p.extent_active <= 1 && p.damage_weapon <= 12 && p.extent_weapon <= 12 &&
-        p.reflected[0] <= 1 && p.reflected[1] <= 1 && p.reflected[2] <= 1;
+    if (!in || len != sizeof s_players) return 0;
+    ProtoState p[2];memcpy(p,in,sizeof p);
+    for(int i=0;i<2;i++)if(memcmp(p[i].magic,"MP02",4)||p[i].enabled!=s_on||p[i].mode!=s_mode||p[i].selected>1||p[i].teleport>32||
+        p[i].damage_active>1||p[i].extent_active>1||p[i].damage_weapon>12||p[i].extent_weapon>12||p[i].reflected[0]>1||p[i].reflected[1]>1||p[i].reflected[2]>1)return 0;
+    return 1;
 }
 static int set(const uint8_t *in, int len) {
     if (!valid(in, len)) return 0;
-    if (len) memcpy(&S, in, sizeof S); else memset(&S, 0, sizeof S);
+    if (len) memcpy(s_players,in,sizeof s_players);else memset(s_players,0,sizeof s_players);
     return 1;
 }
 void mm5_proto_register(void) {
@@ -268,7 +276,7 @@ void mm5_proto_register(void) {
 }
 int mm5_proto_json(char *out, int cap) {
     return snprintf(out, cap, "\"proto\":{\"on\":%d,\"mode\":%d,\"selected\":%u,\"teleport\":%u,\"switches\":%llu,\"blocks\":%llu,\"reflections\":%llu,\"limited\":%llu,\"shots\":[%u,%u,%u],\"shot_charge\":[%u,%u,%u],\"player\":[%u,%u,%u],\"animation\":[%u,%u,%u,%d]}",
-        s_on, s_mode, S.selected, S.teleport, (unsigned long long)S.switches, (unsigned long long)S.blocks,
+        s_on, s_mode, selected(), S.teleport, (unsigned long long)S.switches, (unsigned long long)S.blocks,
         (unsigned long long)S.reflections, (unsigned long long)S.limited,
         R(0x301), R(0x302), R(0x303), R(0x469), R(0x46A), R(0x46B), R(0x330), R(0x378), R(0x5B8),
         R(0x558), R(0x540), R(0x570), drawn_frame());

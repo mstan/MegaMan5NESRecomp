@@ -2,6 +2,7 @@
 #include "mm5_proto.h"
 #include "mm5_world.h"
 #include "mm5_wide.h"
+#include "mm5_coop.h"
 #include "cyc_mod.h"
 #include "cyc_render.h"
 #include "mod_function_hooks.h"
@@ -14,7 +15,7 @@ typedef struct {
     Mm5ProtoBody body;
 } ViewFrame;
 static ViewFrame s_build, s_frame;
-static int s_enabled, s_wide;
+static int s_enabled, s_wide, s_coop;
 static uint32_t s_bg[256 * 240];
 static uint8_t s_opaque[864 * 240], s_allowed[64][240];
 static uint8_t s_claimed[864 * 240];
@@ -23,6 +24,7 @@ static int begin(uint16_t address) {
     (void)address;
     memset(&s_build, 0, sizeof s_build); memset(s_build.owners, 255, sizeof s_build.owners);
     mm5_wide_begin();
+    mm5_coop_build();
     return 0;
 }
 static int part(uint16_t address) {
@@ -37,6 +39,7 @@ static int dma(uint16_t address) {
     (void)address;
     memcpy(&s_frame, &s_build, sizeof s_frame);
     mm5_wide_latch();
+    mm5_coop_latch();
     return 0;
 }
 static uint32_t color(int index, const Mm5ProtoBody *body) {
@@ -69,6 +72,7 @@ static void character_body(uint32_t *out, int W, int origin, const Mm5ProtoBody 
         if (!b->behind || !s_opaque[at]) out[at] = color(index, b);
     }
 }
+void mm5_view_draw_character(uint32_t *out,int width,int origin,const Mm5ProtoBody *body) { character_body(out,width,origin,body); }
 static uint32_t menu_color(uint32_t c) {
     /* Follow the native inventory's fade instead of leaving bright host art. */
     uint32_t light = cyc_render_color(1), white = cyc_render_color_value(0x20);
@@ -135,13 +139,13 @@ static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *na
      * Never paint the last latched gameplay actor over its native panels. */
     if (s_enabled && cyc_mod_peek(0x26) == 16 && cyc_mod_peek(0x59)) return inventory(out, W, H, native);
     if (cyc_mod_peek(0x26) >= 16 || cyc_mod_peek(0x59) || cyc_mod_peek(0x1B)) return 0;
-    if (!(s_enabled || s_wide) || W < 256 || W > 864 || H != 240 ||
+    if (!(s_enabled || s_wide || s_coop) || W < 256 || W > 864 || H != 240 ||
         !cyc_render_background(s_bg)) return 0;
     int origin = (W - 256) / 2;
     int wide = mm5_wide_background(out, W, H, s_bg, s_opaque, &origin);
     int replace = s_enabled && s_frame.valid && s_frame.body.active;
     if (!wide) {
-        if (!replace) return 0;
+        if (!replace && !s_coop) return 0;
         memset(s_opaque, 0, sizeof s_opaque);
         for (int i = 0; i < W * H; ++i) out[i] = 0xFF000000u;
         for (int y = 0; y < H; ++y) memcpy(out + y * W + origin, s_bg + y * 256, 256 * sizeof *out);
@@ -160,6 +164,7 @@ static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *na
     }
     cyc_render_set_native_origin(origin);
     memset(s_claimed, 0, (size_t)W * H);
+    int partner=0;
     /* An opaque higher-priority sprite claims its pixel even behind terrain.
      * Otherwise a lower-priority foreground sprite can leak through it. */
     for (int rank = 0; rank <= (wide ? 255 : 0); ++rank) {
@@ -168,9 +173,11 @@ static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *na
             if (wide && (owner == 255 ? 0 : mm5_wide_rank(owner)) != rank) continue;
             if (replace && owner == 0) { if (slot == first) character_body(out, W, origin, &s_frame.body); }
             else sprite(out, W, origin, slot, oam);
+            if(owner==0 && slot==first) {mm5_coop_draw(out,W,origin,s_opaque,s_claimed);partner=1;}
         }
         if (wide) mm5_wide_draw(out, W, s_opaque, s_claimed, rank);
     }
+    if(!partner)mm5_coop_draw(out,W,origin,s_opaque,s_claimed);
     cyc_render_set_native_origin(origin); return 1;
 }
 void mm5_view_power(void) {
@@ -178,16 +185,17 @@ void mm5_view_power(void) {
     memset(&s_frame, 0, sizeof s_frame); memset(s_frame.owners, 255, sizeof s_frame.owners);
 }
 static void refresh(void) {
-    int active = s_enabled || s_wide;
+    int active = s_enabled || s_wide || s_coop;
     nes_mod_set_function_hook_enabled("mm5.view.begin", active);
     nes_mod_set_function_hook_enabled("mm5.view.part", active);
     nes_mod_set_function_hook_enabled("mm5.view.dma", active);
     cyc_render_set_compositor(active ? render : NULL, NULL);
-    cyc_render_set_stock_compositing(s_enabled != 0);
+    cyc_render_set_stock_compositing((s_enabled || s_coop) != 0);
     cyc_render_capture_background(active != 0);
 }
 void mm5_view_enable(int enabled) { s_enabled = enabled != 0; refresh(); }
 void mm5_view_wide(int enabled) { s_wide = enabled != 0; refresh(); }
+void mm5_view_coop(int enabled) { s_coop = enabled != 0; refresh(); }
 static int get(uint8_t *out, int cap) {
     if (cap < sizeof s_frame + sizeof s_build) return -1;
     memcpy(s_build.magic, "MV01", 4); memcpy(s_frame.magic, "MV01", 4);
@@ -195,7 +203,7 @@ static int get(uint8_t *out, int cap) {
     return sizeof s_build + sizeof s_frame;
 }
 static int valid(const uint8_t *in, int len) {
-    if (!len) return !(s_enabled || s_wide);
+    if (!len) return !(s_enabled || s_wide || s_coop);
     if (!in || len != sizeof s_build + sizeof s_frame) return 0;
     ViewFrame frames[2]; memcpy(frames, in, sizeof frames);
     for (int i = 0; i < 2; ++i) {

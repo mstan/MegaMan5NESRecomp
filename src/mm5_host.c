@@ -3,6 +3,7 @@
 #include "mm5_cart.h"
 #include "mm5_world.h"
 #include "mm5_wide.h"
+#include "mm5_coop.h"
 #include "cyc_host_extras.h"
 #include "cyc_input.h"
 #include "cyc_ring.h"
@@ -13,8 +14,9 @@
 #include <string.h>
 static FILE *s_log;
 static int s_proto_on, s_proto_mode = 1, s_proto_start = 1;
+static int s_coop_roster;
 
-static void reset(void) { mm5_weapons_set(0); s_proto_on = 0; mm5_proto_set(0, s_proto_mode, s_proto_start); mm5_wide_set(0,"fit"); }
+static void reset(void) { mm5_coop_set(0,s_coop_roster);mm5_weapons_set(0);s_proto_on=0;mm5_proto_set(0,s_proto_mode,s_proto_start);mm5_wide_set(0,"fit"); }
 static void activate_wide(void) {
     char aspect[24]="fit";
     nes_mod_option_value("mega-man-5-usa.enhancement.widescreen","widescreen","aspect",aspect,sizeof aspect);
@@ -33,25 +35,36 @@ NES_MOD_CONSTRUCTOR(register_mm5) {
     mm5_weapons_register();
     mm5_proto_register();
     mm5_wide_register();
+    mm5_coop_register();
     nes_mod_register_function_entry_plugin("mm5.player", 0xDEB1, mm5_weapons_dispatch);
     nes_mod_register_reset_callback(reset);
     nes_mod_register_activation_plugin("mega-man-5-usa.weapons", activate_weapons);
     nes_mod_register_activation_plugin("mega-man-5-usa.protoman", activate_proto);
     nes_mod_register_activation_plugin("mega-man-5-usa.widescreen", activate_wide);
 }
-static void power(void *ctx) { (void)ctx; mm5_cart_power(); mm5_weapons_power(); mm5_proto_power(); mm5_wide_power(); }
-static void input(void *ctx, uint8_t buttons[2]) { (void)ctx; (void)buttons; mm5_weapons_input(); }
+static void power(void *ctx) { (void)ctx; mm5_cart_power();mm5_coop_power();mm5_weapons_power();mm5_proto_power();mm5_wide_power(); }
+static void input(void *ctx, uint8_t buttons[2]) { (void)ctx;mm5_coop_input(buttons);mm5_weapons_input(); }
 static void end(void *ctx) {
-    (void)ctx; mm5_weapons_end(); mm5_proto_end();
+    (void)ctx;mm5_coop_end();mm5_weapons_end();mm5_proto_end();
     if (s_log) {
-        char fields[1024]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
+        char fields[2048]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
         mm5_proto_json(fields + n, sizeof fields - n);
         n = (int)strlen(fields); fields[n++] = ','; mm5_wide_json(fields+n,sizeof fields-n);
+        n = (int)strlen(fields); fields[n++] = ','; mm5_coop_json(fields+n,sizeof fields-n);
         fprintf(s_log, "{\"frame\":%u,%s}\n", cyc_ring_frame, fields);
     }
 }
 static bool option(void *ctx, const char *name, const char *value) {
     (void)ctx;
+    if(!strcmp(name,"--coop")) {
+        if(strcmp(value,"on") && strcmp(value,"off"))return false;
+        if(!strcmp(value,"on")){s_proto_on=1;if(!mm5_proto_set(1,s_proto_mode,s_proto_start))return false;}
+        mm5_coop_set(!strcmp(value,"on"),s_coop_roster);return true;
+    }
+    if(!strcmp(name,"--coop-roster")) {
+        if(strcmp(value,"megaman") && strcmp(value,"protoman"))return false;
+        s_coop_roster=!strcmp(value,"protoman");mm5_coop_set(mm5_coop_enabled(),s_coop_roster);return true;
+    }
     if (!strcmp(name, "--world-audit")) return mm5_world_audit_file(value);
     if (!strcmp(name, "--widescreen")) {
         if (strcmp(value,"on") && strcmp(value,"off")) return false;
@@ -72,9 +85,10 @@ static bool option(void *ctx, const char *name, const char *value) {
     mm5_weapons_set(!strcmp(value, "on")); return true;
 }
 static void state(int id, const char *line) {
-    (void)line; char fields[1024]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
+    (void)line; char fields[2048]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
     mm5_proto_json(fields + n, sizeof fields - n);
     n = (int)strlen(fields); fields[n++] = ','; mm5_wide_json(fields+n,sizeof fields-n);
+    n = (int)strlen(fields); fields[n++] = ','; mm5_coop_json(fields+n,sizeof fields-n);
     cyc_tcp_ok(id, fields);
 }
 static void tcp(void *ctx) { (void)ctx; cyc_tcp_register("mm5_state", "MM5 native player and weapon adapter state", state); }
@@ -92,10 +106,12 @@ const CycHostExtras *cyc_host_extras(void) {
         {"--proto-start", true, "protoman|megaman: solo starting character"},
         {"--world-audit", true, "FILE: native terrain-decoder comparison for QA"},
         {"--widescreen", true, "on|off: adaptive Fit and native widened actor activation"},
+        {"--coop", true, "on|off: personal local co-op development controls"},
+        {"--coop-roster", true, "megaman|protoman: character assigned to player one"},
     };
     static const CycHostExtras extras = {
         .power_on = power, .input = input, .frame_end = end, .tcp_setup = tcp,
-        .option = option, .options = options, .option_count = 7, .input_profile = &profile,
+        .option = option, .options = options, .option_count = 9, .input_profile = &profile,
     };
     return &extras;
 }

@@ -36,7 +36,7 @@ nesrecomp_add_cycle_game(MegaMan5Recomp
     ROM "${NESRECOMP_ROM}"
     GAME_CONFIG "${CMAKE_SOURCE_DIR}/game.toml"
     GAME_ID "mega-man-5-usa"
-    PLAYERS 1
+    PLAYERS 2
     REGION NTSC
     ${mm5_compiler_args}
     MODS
@@ -44,6 +44,7 @@ nesrecomp_add_cycle_game(MegaMan5Recomp
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_host.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_cart.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_world.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_coop.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_wide.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_weapons.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_proto.c"

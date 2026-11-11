@@ -93,3 +93,33 @@ id = "mm5.wide.spawn"
 addr = 0xDED4
 length = 8
 crc32 = 0x80C59164
+
+[[mod_function_hook]]
+id = "mm5.coop.controller"
+addr = 0x8000
+length = 8
+crc32 = 0x5043B3B9
+
+[[mod_function_hook]]
+id = "mm5.coop.after-controller"
+addr = 0xDEB4
+length = 8
+crc32 = 0x25B36F44
+
+[[mod_function_hook]]
+id = "mm5.coop.personal-end"
+addr = 0x8039
+length = 8
+crc32 = 0x7D3B8EE9
+
+[[mod_function_hook]]
+id = "mm5.coop.world-begin"
+addr = 0x8000
+length = 8
+crc32 = 0xDD87F922
+
+[[mod_function_hook]]
+id = "mm5.coop.pause"
+addr = 0xDE89
+length = 8
+crc32 = 0x5A71D997
