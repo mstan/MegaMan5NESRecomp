@@ -16,7 +16,6 @@
 2400 2:SELECT
 2490 2:-
 2500 SELECT
-2590 -
 # A native tile-replacement record creates an overhead platform in the beam's
 # column. The returning player must reach the checked floor beside the partner.
 2595 POKE 0043 04
@@ -27,9 +26,10 @@
 2600 2:SELECT
 2601 2:-
 2700 POKE 0043 00
+2770 -
 2800 SELECT
 2890 -
 2900 2:SELECT
-2990 2:-
 3000 SELECT
 3001 -
+3170 2:-

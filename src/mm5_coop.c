@@ -31,6 +31,9 @@ static int s_on,s_roster,s_scope,s_personal_bhv;
 static uint16_t s_addr[PERSONAL_CAP],s_index[2048];
 static int s_count;
 static int checkpoint_at(int screen);
+static void reset_select(void) {
+    memset(C.select_hold,0,sizeof C.select_hold);memset(C.select_armed,0,sizeof C.select_armed);
+}
 typedef struct {const char *id;int enabled;} HookSetting;
 static HookSetting s_hooks[128];
 static int s_hook_count;
@@ -130,6 +133,7 @@ static int private_step(int seat) {
         if(p->teleport==TELE_IN && R(0x30)!=8) {
             p->teleport=TELE_NONE;P(0x5B8,60);
             if(C.withdrawn&(1u<<seat)){C.withdrawn&=(uint8_t)~(1u<<seat);C.rejoins[seat]++;}
+            reset_select();
         }
         capture(p);snapshot_ram(after);C.updates[seat]++;
     }
@@ -146,7 +150,7 @@ static void initialize(void) {
     }
     C.retry=C.wiping=0;
     C.withdrawn=C.revive_pending=0;C.checkpoint=(uint8_t)checkpoint_at(R(0x69));
-    memset(C.select_hold,0,sizeof C.select_hold);memset(C.select_armed,0,sizeof C.select_armed);
+    reset_select();
     int x=(R(0x348)<<8)|R(0x330);x=x>=32?x-16:x+16;
     set_personal(&C.player[1],0x330,x);set_personal(&C.player[1],0x348,x>>8);
     for(int seat=0;seat<2;seat++)C.player[seat].previous=C.raw[seat];
@@ -319,6 +323,7 @@ static void start_arrival(int seat,int x,int y,int heal) {
     set_personal(p,0x528,0x80|(R(0x528)&0x20));set_personal(p,0x5B8,0);
     if(heal){set_personal(p,0xB0,0x9C);C.revivals[seat]++;}
     p->dead=0;p->teleport=TELE_IN;p->arrival_floor=(uint8_t)y;p->previous=C.raw[seat];C.revive_pending&=(uint8_t)~(1u<<seat);
+    reset_select();
 }
 static void select_tick(void) {
     int gameplay=!C.menu && !C.ai_active && !C.wiping && R(0x26)<16 && R(0x30)<=3 &&
@@ -335,6 +340,7 @@ static void select_tick(void) {
             set_personal(p,0x30,0x10);set_personal(p,0x558,0x13);set_personal(p,0x540,4);set_personal(p,0x570,0);
             set_personal(p,0x3D8,0);set_personal(p,0x3F0,8);set_personal(p,0x38,0);set_personal(p,0x34,0);set_personal(p,0x33,0);
             p->teleport=TELE_OUT;C.withdrawn|=(uint8_t)(1u<<seat);C.withdrawals[seat]++;C.select_hold[seat]=0;
+            reset_select();
             if(seat==C.anchor){C.anchor=C.current=(uint8_t)(seat^1);project(&C.player[C.anchor]);P(0x18,255);C.handoffs++;}
             int q=R(0xDA)&7;if(R(0xDC+q)==0x88){P(0xDC+q,0x35);P(0xDA,(q+1)&7);}
         }
@@ -421,6 +427,7 @@ static int valid(const uint8_t *in,int len) {
     if(!len)return !s_on;if(!in || len!=sizeof C)return 0;
     static Coop p;memcpy(&p,in,sizeof p);
     if(memcmp(p.magic,"MC05",4)||p.enabled!=s_on||p.roster!=s_roster||p.initialized>1||p.anchor>1||p.current>1||p.menu>1||p.pauser>1||p.ai_active>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
+    for(int seat=0;seat<2;seat++)if(p.select_hold[seat]>90 || p.select_armed[seat]>1)return 0;
     const Picture *f[2]={&p.build,&p.frame};
     for(int i=0;i<2;i++) {
         if(f[i]->valid>1||f[i]->seat>1||f[i]->count>PART_CAP||f[i]->body.pose>=CYC_PROTO_POSE_COUNT||f[i]->body.active>1||f[i]->body.right>1||f[i]->body.flipped>1||f[i]->body.behind>1)return 0;
