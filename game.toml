@@ -165,3 +165,9 @@ id = "mm5.coop.vertical"
 addr = 0xCE82
 length = 8
 crc32 = 0xF2682DA1
+
+[[mod_function_hook]]
+id = "mm5.coop.camera"
+addr = 0xDEC3
+length = 8
+crc32 = 0xB201264B

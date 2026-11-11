@@ -419,6 +419,51 @@ static int before_scroll(uint16_t address) {
     if(!s_on || !C.initialized || C.menu || C.ai_active || C.wiping || C.scene_active || cyc_mod_isolated())return 0;
     C.scene_vertical=(uint8_t)(address==0xCE82);C.scene_scroll_y=R(0xFA);scene_start();return 0;
 }
+/* Match C9DD's authored exit tests against the initiating body. The native
+ * camera script still accepts the exit and owns every progression write. */
+static int exit_intent(int seat) {
+    const Player *p=&C.player[seat];int state=personal(p,0x30),page=personal(p,0x348);
+    if(p->dead || p->teleport!=TELE_NONE || (C.withdrawn&(1u<<seat)) || state>3 || personal(p,0x390) ||
+        !(personal(p,0xB0)&31) || page!=R(0xF9))return 0;
+    int flags=R(0x29),section=flags&31,header=mm5_cart_prg(C.stage,0xA950+section),local=R(0x2B);
+    int x=personal(p,0x330),y=personal(p,0x378),oldx=(personal(p,0x3D)<<8)|personal(p,0x3C),wx=(page<<8)|x;
+    if((flags&32) && !(flags&0xC0)) {
+        int next=mm5_cart_prg(C.stage,0xA951+section);
+        if(local==R(0x2A) && x>240 && wx>oldx && !R(0x55) && (next&32) && !(next&0xC0))return 1;
+        if(!local && x<16 && wx<oldx && section && (mm5_cart_prg(C.stage,0xA968+section)&64) &&
+            (mm5_cart_prg(C.stage,0xA94F+section)&32))return 1;
+    }
+    if(R(0xFC))return 0;
+    int direction=0;
+    if(R(0xAF)) {if(y<8)direction=128;else if(y>=232 && state==3)direction=64;}
+    else {if(y>=232)direction=64;else if(y<8 && (personal(p,0x37) || state==3))direction=128;}
+    if(!direction)return 0;
+    /* CFF0 first checks explicit per-screen vertical links. */
+    for(int i=0;i<32;i+=4) {
+        int screen=mm5_cart_prg(C.stage,0xA9E0+i);if(screen&128)break;
+        if(screen==page) {if(mm5_cart_prg(C.stage,0xA9E1+i)==direction)return 1;break;}
+    }
+    if(flags&0xC0) {
+        if(flags&direction)return local<=R(0x2A);
+        return local>0 || section>0;
+    }
+    int next=mm5_cart_prg(C.stage,0xA951+section);
+    if((!R(0x2A) && (next&direction)) || (local && local==R(0x2A)))return (next&direction)!=0;
+    return !local && section && (header&0xC0) && (((header&0xC0)^0xC0)&direction);
+}
+static int before_camera(uint16_t address) {
+    (void)address;
+    if(!s_on || !C.initialized || C.menu || C.ai_active || C.wiping || C.scene_active || C.follow ||
+        R(0x26)!=C.stage || R(0x54) || R(0x59) || R(0x1B) || R(0x5A) || R(0xFA) || cyc_mod_isolated())return 0;
+    capture(&C.player[C.anchor]);
+    /* Seat order resolves simultaneous requests without advancing the world
+     * twice or borrowing either player's inventory for the other. */
+    for(int seat=0;seat<2;seat++)if(exit_intent(seat)) {
+        if(seat!=C.anchor){C.anchor=C.current=(uint8_t)seat;project(&C.player[seat]);P(0x18,255);C.handoffs++;}
+        break;
+    }
+    return 0;
+}
 static void scene_tick(void) {
     if(!C.initialized || C.menu || C.ai_active || C.wiping || R(0x26)!=C.stage)return;
     if(!C.scene_active && scene_changed()) {
@@ -536,7 +581,7 @@ void mm5_coop_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint
     }
 }
 void mm5_coop_power(void) { memset(&C,0,sizeof C);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses(); }
-static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage","mm5.coop.scroll-end","mm5.coop.advance","mm5.coop.retreat","mm5.coop.vertical"};
+static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage","mm5.coop.scroll-end","mm5.coop.advance","mm5.coop.retreat","mm5.coop.vertical","mm5.coop.camera"};
 void mm5_coop_set(int enabled,int roster) {
     if(enabled)mm5_proto_cancel_swap();
     s_on=enabled!=0;s_roster=roster!=0;C.initialized=0;C.current=C.anchor=0;C.pending_pause=255;
@@ -571,6 +616,7 @@ void mm5_coop_register(void) {
     nes_mod_register_function_entry_plugin(HOOKS[8],0xDEC6,after_scroll);
     nes_mod_register_function_entry_plugin(HOOKS[9],0xCB80,before_scroll);nes_mod_register_function_entry_plugin(HOOKS[10],0xCC68,before_scroll);
     nes_mod_register_function_entry_plugin(HOOKS[11],0xCE82,before_scroll);
+    nes_mod_register_function_entry_plugin(HOOKS[12],0xDEC3,before_camera);
     nes_mod_register_savestate_hook("mm5.coop",get,set);nes_mod_register_savestate_validator("mm5.coop",valid);
 }
 int mm5_coop_json(char *out,int cap) {
