@@ -3,6 +3,7 @@
 #include "mm5_world.h"
 #include "mm5_wide.h"
 #include "mm5_coop.h"
+#include "mm5_hud.h"
 #include "cyc_mod.h"
 #include "cyc_render.h"
 #include "mod_function_hooks.h"
@@ -113,6 +114,7 @@ static int inventory(uint32_t *out, int W, int H, const uint32_t *native) {
 }
 static void sprite(uint32_t *out, int W, int origin, int slot, const uint8_t *oam) {
     const uint8_t *o = oam + slot * 4;
+    if(s_frame.owners[slot]==255 && mm5_hud_native_meter(o))return;
     int top = o[0] + 1, height = cyc_render_line_sprite16(top < 240 ? top : 239) ? 16 : 8;
     for (int y = 0; y < height; ++y) {
         int py = top + y;
@@ -178,6 +180,7 @@ static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *na
         if (wide) mm5_wide_draw(out, W, origin, s_opaque, s_claimed, rank);
     }
     if(!partner)mm5_coop_draw(out,W,origin,s_opaque,s_claimed);
+    mm5_hud_draw(out,W,H,-1);
     cyc_render_set_native_origin(origin); return 1;
 }
 void mm5_view_power(void) {

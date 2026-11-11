@@ -45,6 +45,7 @@ nesrecomp_add_cycle_game(MegaMan5Recomp
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_cart.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_world.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_coop.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_hud.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_wide.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_weapons.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_proto.c"

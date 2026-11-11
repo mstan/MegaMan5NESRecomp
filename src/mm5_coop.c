@@ -4,6 +4,7 @@
 #include "mm5_proto.h"
 #include "mm5_weapons.h"
 #include "mm5_world.h"
+#include "mm5_hud.h"
 #include "cyc_mod.h"
 #include "cyc_render.h"
 #include "cyc_ring.h"
@@ -57,6 +58,7 @@ static int s_hook_count;
 int mm5_coop_enabled(void) { return s_on; }
 int mm5_coop_seat(void) { return s_on?C.current:0; }
 int mm5_coop_character(void) { return s_on?(s_roster^C.current):-1; }
+int mm5_coop_character_at(int seat) {return s_on && seat>=0 && seat<2?(s_roster^seat):0;}
 int mm5_coop_native_scope(void) { return s_on && s_scope; }
 static void addresses(void) {
     if(s_count)return;
@@ -303,6 +305,7 @@ static int stage_load(uint16_t address) {
         capture(&C.player[C.current]);C.retry=(uint8_t)(C.wiping && C.stage==R(0x26));
         C.initialized=C.ai_active=C.menu=C.scene_active=C.follow=0;C.current=C.anchor=0;C.pending_pause=255;
         memset(&C.build,0,sizeof C.build);memset(&C.frame,0,sizeof C.frame);
+        mm5_hud_reset();
     }
     return 0;
 }
@@ -532,6 +535,7 @@ static uint8_t pattern(const uint8_t banks[6],int address) {
 void mm5_coop_build(void) {
     memset(&C.build,0,sizeof C.build);
     if(!s_on || !C.initialized || C.menu || R(0x26)>=16)return;
+    if(!mm5_hud_capture())C.failures++;
     int seat=C.current^1,owner=C.current;
     scene_shift();
     if(C.scene_active && C.player[seat].teleport==TELE_OUT && C.last_step[seat]!=cyc_ring_frame)
@@ -565,7 +569,7 @@ void mm5_coop_build(void) {
     if(ok){capture(&C.player[seat]);C.build.valid=1;C.build.seat=(uint8_t)seat;if(!body)C.build.body.active=0;}else C.failures++;
     cyc_mod_isolate_end();C.current=(uint8_t)owner;
 }
-void mm5_coop_latch(void) { C.frame=C.build; }
+void mm5_coop_latch(void) { C.frame=C.build;mm5_hud_latch(); }
 void mm5_coop_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint8_t *claimed) {
     if(!s_on || !C.frame.valid || C.menu)return;
     int painted=0;
@@ -580,11 +584,12 @@ void mm5_coop_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint
         }
     }
 }
-void mm5_coop_power(void) { memset(&C,0,sizeof C);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses(); }
+void mm5_coop_power(void) { memset(&C,0,sizeof C);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses();mm5_hud_reset(); }
 static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage","mm5.coop.scroll-end","mm5.coop.advance","mm5.coop.retreat","mm5.coop.vertical","mm5.coop.camera"};
 void mm5_coop_set(int enabled,int roster) {
     if(enabled)mm5_proto_cancel_swap();
     s_on=enabled!=0;s_roster=roster!=0;C.initialized=0;C.current=C.anchor=0;C.pending_pause=255;
+    mm5_hud_reset();
     for(int i=0;i<sizeof HOOKS/sizeof *HOOKS;i++)nes_mod_set_function_hook_enabled(HOOKS[i],s_on);
     nes_mod_set_local_only("MM5 personal co-op (unqualified netplay)",s_on);mm5_view_coop(s_on);
 }
@@ -608,6 +613,7 @@ static int valid(const uint8_t *in,int len) {
 }
 static int set(const uint8_t *in,int len) {if(!valid(in,len))return 0;if(len)memcpy(&C,in,sizeof C);else mm5_coop_power();return 1;}
 void mm5_coop_register(void) {
+    mm5_hud_register();
     addresses();nes_mod_register_function_entry_plugin(HOOKS[0],0x8000,controller);nes_mod_register_function_entry_plugin(HOOKS[1],0xDEB4,after_controller);
     nes_mod_register_function_entry_plugin(HOOKS[2],0x8039,personal_end);nes_mod_register_function_entry_plugin(HOOKS[3],0x8000,world_begin);
     nes_mod_register_function_entry_plugin(HOOKS[4],0xDE89,pause_entry);
