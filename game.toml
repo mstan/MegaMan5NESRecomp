@@ -243,3 +243,21 @@ id = "mm5.world.pool-birth"
 addr = 0x8D6C
 length = 8
 crc32 = 0x3272D34C
+
+[[mod_function_hook]]
+id = "mm5.wide.authored"
+addr = 0x9995
+length = 8
+crc32 = 0xCE350A51
+
+[[mod_function_hook]]
+id = "mm5.wide.born"
+addr = 0x9A3B
+length = 8
+crc32 = 0xB2EFAE6F
+
+[[mod_function_hook]]
+id = "mm5.wide.clear"
+addr = 0xC39D
+length = 8
+crc32 = 0xFB9958BD

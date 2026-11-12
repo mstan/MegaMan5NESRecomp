@@ -32,6 +32,7 @@ typedef struct {
     char magic[4]; uint8_t enabled,noflicker,reserved[2];
     uint64_t spawns,rendered,full,failed;
     WideFrame build,frame;
+    uint8_t seen_stage,seen[128];
 } WideState;
 static WideState S;
 static int s_on,s_no_flicker;
@@ -133,25 +134,47 @@ static int capture_actor(int slot,int owner,int extra) {
 }
 static int actor(uint16_t address){(void)address;CycModRegs r;cyc_mod_regs(&r);return capture_actor(r.x,r.x,0);}
 void mm5_wide_capture_extra(int slot,int index){if(index>=0 && index<16)capture_actor(slot,24+index,1);}
+static void seen_stage(int stage) {
+    if(S.seen_stage!=stage){memset(S.seen,0,sizeof S.seen);S.seen_stage=(uint8_t)stage;}
+}
+static int authored(uint16_t address) {
+    (void)address;if(cyc_mod_isolated() || R(0x26)>=16)return 0;
+    int camera,left,lo,hi,width=mm5_net_simulation_width(cyc_video_width());
+    if(!geometry(width,&camera,&left,&lo,&hi) || !mm5_cart_ready())return 0;
+    int index=R(6);if(index>=128)return 0;seen_stage(R(0x26));
+    int wx=mm5_cart_prg(R(0x26),0xAA00+index)*256+mm5_cart_prg(R(0x26),0xAA80+index);
+    int visible=mm5_coop_independent()?in_views(wx,24):(wx+24>=left && wx-24<left+width);
+    if(!visible){S.seen[index]=0;return 0;}if(!S.seen[index])return 0;
+    CycModRegs r;cyc_mod_regs(&r);r.a=(uint8_t)index;r.x=23;r.p=(uint8_t)((r.p&~0x82)|3);cyc_mod_set_regs(&r);return 1;
+}
+static int born(uint16_t address) {
+    (void)address;if(cyc_mod_isolated() || R(0x26)>=16)return 0;
+    CycModRegs r;cyc_mod_regs(&r);if(r.x<8 || r.x>=24)return 0;int index=R(0x438+r.x);
+    if(R(0x300+r.x) && index<128){seen_stage(R(0x26));S.seen[index]=1;}return 0;
+}
+static int clear(uint16_t address) {
+    (void)address;if(!cyc_mod_isolated()){memset(S.seen,0,sizeof S.seen);S.seen_stage=255;}return 0;
+}
 static int spawn(uint16_t address) {
     (void)address;
     if (cyc_mod_isolated()) return 0;
     int camera,left,lo,hi;
     int width=mm5_net_simulation_width(cyc_video_width());
     if (!geometry(width,&camera,&left,&lo,&hi) || !mm5_cart_ready()) return 0;
-    int stage=R(0x26);
+    int stage=R(0x26);seen_stage(stage);
     for (int index=0;index<128;index++) {
         int screen=mm5_cart_prg(stage,0xAA00+index);
         if (screen>=0x80) break; /* native sorted-list terminator; tail is other data */
         int wx=screen*256+mm5_cart_prg(stage,0xAA80+index);
         int code=mm5_cart_prg(stage,0xAB80+index), y=mm5_cart_prg(stage,0xAB00+index);
-        if (code>=0xC0 || wx<lo || wx>=hi || y>=240)continue;
-        if(mm5_coop_independent()){if(!in_views(wx,24))continue;}
-        else if(wx+24<left || wx-24>=left+width)continue;
-        if (wx>=camera && wx<camera+256) continue; /* native traversal owns its rectangle */
+        if (code>=0xC0 || y>=240)continue;
+        int visible=wx>=lo && wx<hi && (mm5_coop_independent()?in_views(wx,24):(wx+24>=left && wx-24<left+width));
+        if(!visible){S.seen[index]=0;continue;}
         int active=mm5_pool_authored(index),free_slot=0;
         for (int slot=8;slot<24;slot++) { if (!R(0x300+slot)) free_slot=1; else if (R(0x438+slot)==index) active=1; }
-        if (active || (R(0x100+(index>>3))&(0x80>>(index&7)))) continue;
+        if(active){S.seen[index]=1;continue;}
+        if (wx>=camera && wx<camera+256) continue; /* native traversal owns its rectangle */
+        if (S.seen[index] || (R(0x100+(index>>3))&(1<<(index&7)))) continue;
         if (!free_slot && !mm5_pool_make_room()) { S.full++; continue; }
         if (!cyc_mod_isolate_begin()) { S.failed++; continue; }
         CycModRegs r; cyc_mod_regs(&r); r.a=0x1B;
@@ -164,7 +187,7 @@ static int spawn(uint16_t address) {
         if (found>=0) for (int base=0x300;base<=0x5B8;base+=0x18) fields[n++]=R(base+found);
         cyc_mod_isolate_end();
         if (!ok) S.failed++;
-        else if (found>=0) { n=0;for (int base=0x300;base<=0x5B8;base+=0x18) P(base+found,fields[n++]); S.spawns++; }
+        else if (found>=0) { n=0;for (int base=0x300;base<=0x5B8;base+=0x18) P(base+found,fields[n++]); S.seen[index]=1;S.spawns++; }
     }
     return 0;
 }
@@ -250,14 +273,18 @@ int mm5_no_flicker_enabled(void) {return s_no_flicker;}
 void mm5_wide_views_changed(void) {
     nes_mod_set_function_hook_enabled("mm5.wide.actor",s_on || s_no_flicker || mm5_coop_enabled());
     nes_mod_set_function_hook_enabled("mm5.wide.spawn",s_on || mm5_coop_enabled());
+    nes_mod_set_function_hook_enabled("mm5.wide.authored",s_on || mm5_coop_enabled());
+    nes_mod_set_function_hook_enabled("mm5.wide.born",s_on || mm5_coop_enabled());
+    nes_mod_set_function_hook_enabled("mm5.wide.clear",1);
 }
-void mm5_wide_power(void) { memset(&S,0,sizeof S); }
-static int get(uint8_t *out,int cap) { if (cap<sizeof S)return -1;memcpy(S.magic,"MX03",4);S.enabled=(uint8_t)s_on;S.noflicker=(uint8_t)s_no_flicker;memcpy(out,&S,sizeof S);return sizeof S; }
+void mm5_wide_power(void) { memset(&S,0,sizeof S);S.seen_stage=255; }
+static int get(uint8_t *out,int cap) { if (cap<sizeof S)return -1;memcpy(S.magic,"MX04",4);S.enabled=(uint8_t)s_on;S.noflicker=(uint8_t)s_no_flicker;memcpy(out,&S,sizeof S);return sizeof S; }
 static int valid(const uint8_t *in,int len) {
     if (!len)return !(s_on || s_no_flicker);
     if (!in || len!=sizeof S)return 0;
     static WideState p;memcpy(&p,in,sizeof p);
-    if (memcmp(p.magic,"MX03",4) || p.enabled!=s_on || p.noflicker!=s_no_flicker)return 0;
+    if (memcmp(p.magic,"MX04",4) || p.enabled!=s_on || p.noflicker!=s_no_flicker || (p.seen_stage>=16 && p.seen_stage!=255))return 0;
+    for(int i=0;i<128;i++)if(p.seen[i]>1)return 0;
     const WideFrame *f[2]={&p.build,&p.frame};
     for(int j=0;j<2;j++) {
         if(f[j]->valid>1 || f[j]->extended>1 || f[j]->count>MAX_PARTS || f[j]->width>CYC_VIDEO_MAX_WIDTH ||
@@ -269,6 +296,9 @@ static int valid(const uint8_t *in,int len) {
 static int set(const uint8_t *in,int len) { if(!valid(in,len))return 0;if(len)memcpy(&S,in,sizeof S);else memset(&S,0,sizeof S);return 1; }
 void mm5_wide_register(void) {
     nes_mod_register_function_entry_plugin("mm5.wide.actor",0xDFC3,actor);nes_mod_register_function_entry_plugin("mm5.wide.spawn",0xDED4,spawn);
+    nes_mod_register_function_entry_plugin("mm5.wide.authored",0x9995,authored);
+    nes_mod_register_function_entry_plugin("mm5.wide.born",0x9A3B,born);
+    nes_mod_register_function_entry_plugin("mm5.wide.clear",0xC39D,clear);
     nes_mod_register_savestate_hook("mm5.wide",get,set);nes_mod_register_savestate_validator("mm5.wide",valid);
 }
 int mm5_wide_json(char *out,int cap) { return snprintf(out,cap,"\"wide\":{\"on\":%d,\"noflicker\":%d,\"width\":%u,\"left\":%d,\"camera\":%u,\"parts\":%u,\"spawns\":%llu,\"rendered\":%llu,\"full\":%llu,\"failed\":%llu}",s_on,s_no_flicker,S.frame.width,S.frame.left,S.frame.camera,S.frame.count,(unsigned long long)S.spawns,(unsigned long long)S.rendered,(unsigned long long)S.full,(unsigned long long)S.failed); }
