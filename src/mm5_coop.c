@@ -29,7 +29,7 @@ typedef struct { uint8_t valid,seat;uint16_t count,camera;Mm5ProtoBody body;Part
 typedef struct {
     char magic[4];uint8_t enabled,initialized,stage,anchor,current,menu,pauser,pending_pause,roster,independent;
     uint8_t raw[2],raw_previous[2],fresh[2];
-    uint8_t ai_active,ai_actor,ai_common,ai_pad[2],wiping,retry,menu_user,menu_busy,menu_cursor[2];
+    uint8_t ai_active,ai_actor,ai_common,ai_pad[2],ai_camera_owned,ai_camera[3],ai_area[3],wiping,retry,menu_user,menu_busy,menu_cursor[2];
     uint8_t withdrawn,select_hold[2],select_armed[2],checkpoint,revive_pending;
     uint8_t scene_active,follow,section,scene_page,scene_vertical,scene_scroll_y,outro,camera_owner;
     uint32_t last_step[2];
@@ -302,6 +302,21 @@ static int ai_begin(uint16_t address) {
     }
     C.ai_active=1;C.ai_actor=(uint8_t)actor;C.ai_common=0;C.ai_pad[0]=R(0x14);C.ai_pad[1]=R(0x16);
     C.current=(uint8_t)seat;project(&C.player[seat]);
+    C.ai_camera_owned=0;
+    /* Native AI also contains bespoke viewport checks, including the stage3
+     * block restorer. Let a distant visible actor use its actual personal
+     * view; restore the authored source camera before the next actor. */
+    if(mm5_coop_independent() && !C.scene_active && !C.follow && !C.outro && !R(0xFA) && (R(0x29)&32)) {
+        int left[2],native=R(0xF9)*256+R(0xFC),view=seat;
+        if(mm5_coop_view_rects(left) && (ex+24<native || ex-24>=native+256)) {
+            if(ex+24<left[view] || ex-24>=left[view]+256)view^=1;
+            if(ex+24>=left[view] && ex-24<left[view]+256) {
+                C.ai_camera[0]=R(0xFC);C.ai_camera[1]=R(0xF9);C.ai_camera[2]=R(0x2B);
+                C.ai_area[0]=R(0x28);C.ai_area[1]=R(0x29);C.ai_area[2]=R(0x2A);C.ai_camera_owned=1;
+                int start=R(0xF9)-R(0x2B);P(0xFC,left[view]);P(0xF9,left[view]>>8);P(0x2B,(left[view]>>8)-start);
+            }
+        }
+    }
     C.targets[seat]++;
     P(0x14,C.fresh[seat]&~0x30);P(0x16,C.raw[seat]&~0x30);return 0;
 }
@@ -347,6 +362,12 @@ static int personal_end(uint16_t address) {
         capture(&C.player[C.current]);
         if(C.ai_common && !other_collision(C.current^1,C.ai_actor))C.failures++;
         if(personal(&C.player[C.current],0x30)>=9 && !C.player[C.current].dead)C.anchor=C.current;
+        if(C.ai_camera_owned) {
+            if(R(0x30)<9 && R(0x28)==C.ai_area[0] && R(0x29)==C.ai_area[1] && R(0x2A)==C.ai_area[2]) {
+                P(0xFC,C.ai_camera[0]);P(0xF9,C.ai_camera[1]);P(0x2B,C.ai_camera[2]);
+            } else C.camera_owner=C.current; /* native script keeps its camera */
+            C.ai_camera_owned=0;
+        }
         C.ai_active=C.ai_common=0;C.current=C.anchor;project(&C.player[C.anchor]);
         P(0x14,C.ai_pad[0]);P(0x16,C.ai_pad[1]);deaths();
     }
@@ -770,11 +791,11 @@ void mm5_coop_set(int enabled,int roster) {
     nes_mod_set_local_only("MM5 personal co-op (unqualified netplay)",s_on);mm5_view_coop(s_on);
     mm5_coop_view_set(s_view);
 }
-static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC0A",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;C.independent=(uint8_t)mm5_coop_independent();memcpy(out,&C,sizeof C);return sizeof C;}
+static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC0B",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;C.independent=(uint8_t)mm5_coop_independent();memcpy(out,&C,sizeof C);return sizeof C;}
 static int valid(const uint8_t *in,int len) {
     if(!len)return !s_on;if(!in || len!=sizeof C)return 0;
     static Coop p;memcpy(&p,in,sizeof p);
-    if(memcmp(p.magic,"MC0A",4)||p.enabled!=s_on||p.roster!=s_roster||p.independent!=mm5_coop_independent()||p.initialized>1||p.anchor>1||p.camera_owner>1||p.current>1||p.menu>1||p.pauser>1||p.menu_user>1||p.menu_busy>1||p.menu_cursor[0]>15||p.menu_cursor[1]>15||p.ai_active>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.outro>1||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
+    if(memcmp(p.magic,"MC0B",4)||p.enabled!=s_on||p.roster!=s_roster||p.independent!=mm5_coop_independent()||p.initialized>1||p.anchor>1||p.camera_owner>1||p.current>1||p.menu>1||p.pauser>1||p.menu_user>1||p.menu_busy>1||p.menu_cursor[0]>15||p.menu_cursor[1]>15||p.ai_active>1||p.ai_camera_owned>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.outro>1||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
     for(int seat=0;seat<2;seat++)if(p.select_hold[seat]>90 || p.select_armed[seat]>1)return 0;
     for(int seat=0;seat<2;seat++)if(p.player[seat].arrival_follow>1 || p.player[seat].entry_state>3)return 0;
     const Picture *f[2]={&p.build,&p.frame};
