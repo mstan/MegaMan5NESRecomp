@@ -173,7 +173,7 @@ static void helper_begin(void) {
 }
 static void helper_end(void) {
     int seat=H.active?H.seat:C.current,platform=R(0x73);
-    H.native_riding[seat]=(uint8_t)(platform>=1 && platform<=4 && (R(0x528+platform)&1)?platform:0);
+    H.native_riding[seat]=(uint8_t)(platform>=1 && platform<24 && (R(0x528+platform)&1)?platform:0);
     if(!H.active)return;
     H.riding[seat]=(uint8_t)(platform==H.slot || (R(0x300+H.slot)==0x45 && R(0x4C8)==H.slot)?H.source:0);
     int slot=H.slot;H.active=0;
@@ -449,6 +449,13 @@ static int ai_begin(uint16_t address) {
     for(int i=0;!intro && !C.outro && i<2;i++)if(!C.player[i].dead && C.player[i].teleport==TELE_NONE && !(C.withdrawn&(1u<<i)) && (personal(&C.player[i],0xB0)&31)) {
         int dx=((personal(&C.player[i],0x348)<<8)|personal(&C.player[i],0x330))-ex;
         int dy=personal(&C.player[i],0x378)-ey;int64_t distance=(int64_t)dx*dx+(int64_t)dy*dy;
+        /* A drift lift inspects its rider, including when a bystander below
+         * its deck is closer to the actor's centre. Native controller contact
+         * selects the platform; ordinary enemy targeting remains geometric. */
+        if(R(0x300+actor)==0x2E) {
+            int rank=H.native_riding[i]==actor?(personal(&C.player[i],0x30)==0?0:1):2;
+            distance+=(int64_t)rank<<32;
+        }
         if(distance<best){best=distance;seat=i;}
     }
     C.ai_active=1;C.ai_actor=(uint8_t)actor;C.ai_flags=(uint8_t)(R(0x6D)==255?AI_LETTERS_FULL:0);C.ai_pad[0]=R(0x14);C.ai_pad[1]=R(0x16);
@@ -536,6 +543,13 @@ static int personal_end(uint16_t address) {
         if(!(C.ai_flags&AI_LETTERS_FULL) && R(0x6D)==255 && R(0xBC)==0x9C)
             for(int seat=0;seat<2;seat++)set_personal(&C.player[seat],0xBC,0x9C);
         capture(&C.player[C.current]);
+        /* Native lift AI ran once and wrote its rider's conveyor channel.
+         * Give that same channel to another actual rider, without a second
+         * movement, pause timer or animation update. */
+        int other=C.current^1;Player *passenger=&C.player[other];
+        if(type==0x2E && H.native_riding[other]==C.ai_actor && !passenger->dead && !passenger->teleport &&
+           !(C.withdrawn&(1u<<other)) && (personal(passenger,0xB0)&31))
+            for(int a=0x39;a<=0x3B;a++)set_personal(passenger,a,R(a));
         /* The remaining native AI writers are Gravity Man ($07:A040),
          * his introduction ($0A:A2C1) and boss death ($0A:A12F). Their
          * authored arena changes apply to both personal bodies. */
@@ -1086,7 +1100,7 @@ static int helper_get(uint8_t *out,int cap) {if(cap<sizeof H)return -1;memcpy(H.
 static int helper_valid(const uint8_t *in,int len) {
     if(!len)return !s_on;if(!in || len!=sizeof H)return 0;
     HelperPlatform h;memcpy(&h,in,sizeof h);
-    return !memcmp(h.magic,"MHp2",4) && h.active<=1 && h.seat<=1 && h.valid[0]<=1 && h.valid[1]<=1 && h.riding[0]<=4 && h.riding[1]<=4 && h.source<=4 && h.previous_source[0]<=4 && h.previous_source[1]<=4 && h.native_riding[0]<=4 && h.native_riding[1]<=4 && (!h.active || (h.slot>=5 && h.slot<=7));
+    return !memcmp(h.magic,"MHp2",4) && h.active<=1 && h.seat<=1 && h.valid[0]<=1 && h.valid[1]<=1 && h.riding[0]<=4 && h.riding[1]<=4 && h.source<=4 && h.previous_source[0]<=4 && h.previous_source[1]<=4 && h.native_riding[0]<24 && h.native_riding[1]<24 && (!h.active || (h.slot>=5 && h.slot<=7));
 }
 static int helper_set(const uint8_t *in,int len) {if(!helper_valid(in,len))return 0;if(len)memcpy(&H,in,sizeof H);else memset(&H,0,sizeof H);return 1;}
 void mm5_coop_register(void) {
