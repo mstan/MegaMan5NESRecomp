@@ -267,3 +267,9 @@ id = "mm5.coop.vehicle-scroll"
 addr = 0xCA03
 length = 8
 crc32 = 0xC691F6F1
+
+[[mod_function_hook]]
+id = "mm5.coop.previous-point"
+addr = 0xDEF3
+length = 8
+crc32 = 0xB210A1D8

@@ -21,6 +21,7 @@
 #define R(a) cyc_mod_peek((uint16_t)(a))
 #define P(a,v) cyc_mod_poke((uint16_t)(a),(uint8_t)(v))
 enum { PERSONAL_CAP=384, PART_CAP=96, TELE_NONE=0, TELE_OUT, TELE_HIDDEN, TELE_IN };
+enum { AI_COMMON_COLLISION=1, AI_LETTERS_FULL=2 };
 typedef struct {
     uint8_t ram[PERSONAL_CAP],previous,dead,teleport,arrival_floor;
     uint8_t arrival_follow,entry_state,entry_subtype,entry_ladder,entry_phase,entry_flags;
@@ -30,7 +31,7 @@ typedef struct { uint8_t valid,seat;uint16_t count,camera;Mm5ProtoBody body;Part
 typedef struct {
     char magic[4];uint8_t enabled,initialized,stage,anchor,current,menu,pauser,pending_pause,roster,independent;
     uint8_t raw[2],raw_previous[2],fresh[2];
-    uint8_t ai_active,ai_actor,ai_common,ai_pad[2],ai_camera_owned,ai_camera[3],ai_area[3],wiping,retry,menu_user,menu_busy,menu_cursor[2];
+    uint8_t ai_active,ai_actor,ai_flags,ai_pad[2],ai_camera_owned,ai_camera[3],ai_area[3],wiping,retry,menu_user,menu_busy,menu_cursor[2];
     uint8_t withdrawn,select_hold[2],select_armed[2],checkpoint,revive_pending;
     uint8_t scene_active,follow,section,scene_page,scene_vertical,scene_scroll_y,outro,camera_owner,wait_mode,waiting;
     uint32_t last_step[2];
@@ -43,7 +44,7 @@ typedef struct {
 static Coop C;
 typedef struct {
     char magic[4];uint8_t active,slot,seat,reserved,original[30];
-    int16_t previous_x[2];uint8_t valid[2],riding[2];
+    int16_t previous_x[2];uint8_t valid[2],riding[2],source,previous_source[2],native_riding[2];
 } HelperPlatform;
 static HelperPlatform H;
 static int s_on,s_requested,s_roster,s_scope,s_personal_bhv,s_view,s_wait_both;
@@ -141,32 +142,79 @@ static void set_personal(Player *p,int a,int value) { int i=s_index[a];if(i)p->r
 static void helper_begin(void) {
     if(H.active || !s_on || !C.initialized || C.scene_active || C.follow || R(0x30)>1 || C.player[C.current].teleport)return;
     int owner=C.current^1;const Player *p=&C.player[owner];
-    int type=personal(p,0x304),flags=personal(p,0x52C);
-    if(p->dead || p->teleport || (C.withdrawn&(1u<<owner)) || !(personal(p,0xB0)&31) ||
-       (type!=2 && type!=0x45) || !(flags&128) || !(flags&1) || (flags&4)) {
-        H.valid[owner]=H.riding[C.current]=0;return;
-    }
+    if(p->dead || p->teleport || (C.withdrawn&(1u<<owner)) || !(personal(p,0xB0)&31)) {H.valid[owner]=H.riding[C.current]=0;return;}
     /* A rider already using their own Rush keeps that native platform. */
     if(R(0x4C8)==4 && (R(0x304)==2 || R(0x304)==0x45) && (R(0x52C)&1)) {H.riding[C.current]=0;return;}
+    int source=0,best=0x7FFFFFFF,type=0;
+    for(int i=1;i<=4;i++) {
+        int t=personal(p,0x300+i),flags=personal(p,0x528+i);
+        if((i==4?(t!=2 && t!=0x45):t!=0x76) || !(flags&128) || !(flags&1) || (flags&4) || personal(p,0x390+i))continue;
+        int dx=((personal(p,0x348+i)<<8)|personal(p,0x330+i))-((R(0x348)<<8)|R(0x330));
+        int dy=personal(p,0x378+i)-(int)R(0x378)-14,score=dx*dx+dy*dy*4;
+        if(score<best){source=i;best=score;type=t;}
+    }
+    if(!source){H.valid[owner]=H.riding[C.current]=0;return;}
     int slot;for(slot=7;slot>=5;slot--)if(!R(0x300+slot))break;
     if(slot<5){H.riding[C.current]=0;return;}
-    int x=(personal(p,0x34C)<<8)|personal(p,0x334),delta=H.valid[owner]?x-H.previous_x[owner]:0;
-    H.previous_x[owner]=(int16_t)x;H.valid[owner]=1;
+    int x=(personal(p,0x348+source)<<8)|personal(p,0x330+source),delta=H.valid[owner] && H.previous_source[owner]==source?x-H.previous_x[owner]:0;
+    H.previous_x[owner]=(int16_t)x;H.valid[owner]=1;H.previous_source[owner]=(uint8_t)source;
     if(delta< -8 || delta>8)delta=0;
-    H.active=1;H.slot=(uint8_t)slot;H.seat=C.current;
-    for(int f=0;f<30;f++) {H.original[f]=R(0x300+f*24+slot);P(0x300+f*24+slot,personal(p,0x304+f*24));}
+    H.active=1;H.slot=(uint8_t)slot;H.seat=C.current;H.source=(uint8_t)source;
+    for(int f=0;f<30;f++) {H.original[f]=R(0x300+f*24+slot);P(0x300+f*24+slot,personal(p,0x300+source+f*24));}
     /* Native Jet AI writes its pilot's conveyor/push fields. A passenger
      * receives the same actual displacement; the owner alone steers/spends. */
-    if(type==0x45 && H.riding[C.current]) {
+    if(type==0x45 && H.riding[C.current]==source) {
         P(0x39,delta<0?2:delta>0?1:0);P(0x3A,0);P(0x3B,delta<0?-delta:delta);
+    } else if(type==0x76 && H.riding[C.current]==source &&
+              ((personal(p,0x588+source)|(personal(p,0x5A0+source)<<8))==0xB4E8 ||
+               (personal(p,0x588+source)|(personal(p,0x5A0+source)<<8))==0xB501)) {
+        P(0x39,personal(p,0x420+source));P(0x3A,personal(p,0x3A8+source));P(0x3B,personal(p,0x3C0+source));
     }
 }
 static void helper_end(void) {
+    int seat=H.active?H.seat:C.current,platform=R(0x73);
+    H.native_riding[seat]=(uint8_t)(platform>=1 && platform<=4 && (R(0x528+platform)&1)?platform:0);
     if(!H.active)return;
-    H.riding[H.seat]=(uint8_t)(R(0x4C8)==H.slot);
+    H.riding[seat]=(uint8_t)(platform==H.slot || (R(0x300+H.slot)==0x45 && R(0x4C8)==H.slot)?H.source:0);
     int slot=H.slot;H.active=0;
     for(int f=0;f<30;f++)P(0x300+f*24+slot,H.original[f]);
-    H.slot=H.seat=0;memset(H.original,0,sizeof H.original);
+    H.slot=H.seat=H.source=0;memset(H.original,0,sizeof H.original);
+}
+/* The original arrow AI already advanced once. Its B57F rider tail only
+ * decrements the ride timer and spends owner ammo; do that once for a foreign
+ * rider too, retaining native B5E8 accounting and the owner's push fields. */
+static int shared_arrow_due(int slot) {
+    int other=C.current^1;const Player *p=&C.player[other];
+    int pc=R(0x588+slot)|(R(0x5A0+slot)<<8);
+    if(slot<1 || slot>3 || R(0x300+slot)!=0x76 || (pc!=0xB4E8 && pc!=0xB501) ||
+       H.riding[other]!=slot || H.native_riding[C.current]==slot || p->dead || p->teleport ||
+       (C.withdrawn&(1u<<other)) || !(personal(p,0xB0)&31))return 0;
+    return 1;
+}
+static int shared_arrow_in_scope(int slot) {
+    if(!shared_arrow_due(slot))return 1;
+    uint8_t timer=(uint8_t)(R(0x468+slot)-1);P(0x468+slot,timer);
+    if(timer)return 1;
+    P(0x468+slot,5);P(0xF6,0x1D);CycModRegs r;cyc_mod_regs(&r);
+    int ok=cyc_mod_call(0xFF43,&r);r.a=1;
+    return ok && cyc_mod_call(0xB5E8,&r);
+}
+static int shared_arrow_primary(int slot) {
+    if(!shared_arrow_due(slot))return 1;
+    Player before,after;capture(&before);
+    if(!cyc_mod_isolate_begin())return 0;
+    int ok=shared_arrow_in_scope(slot);if(ok)capture(&after);
+    cyc_mod_isolate_end();
+    if(ok)for(int i=0;i<s_count;i++)if(before.ram[i]!=after.ram[i])P(s_addr[i],after.ram[i]);
+    return ok;
+}
+static int shared_arrow_private(void) {
+    int owner=C.current^1,slot=H.riding[C.current];
+    if(slot<1 || slot>3)return 1;
+    if(!cyc_mod_isolate_begin())return 0;
+    int seat=C.current;C.current=(uint8_t)owner;project(&C.player[owner]);
+    int ok=shared_arrow_in_scope(slot);if(ok)capture(&C.player[owner]);
+    C.current=(uint8_t)seat;cyc_mod_isolate_end();return ok;
 }
 /* The owner already ran Coil AI once. If its native contact did not trigger,
  * let that same waiting contact routine inspect the other live body. */
@@ -370,8 +418,20 @@ static int controller(uint16_t address) {
 static int after_controller(uint16_t address) {
     (void)address;if(s_on && C.initialized && !cyc_mod_isolated() && !C.menu) {
         helper_end();
+        if(!shared_arrow_private())C.failures++;
         limit_shared();capture(&C.player[C.anchor]);C.updates[C.anchor]++;C.last_step[C.anchor]=cyc_ring_frame;
     }return 0;
+}
+/* Match the cartridge's DEDF..DEF1 position history at its exact tail.
+ * The private controller does not execute this shared main-loop code. */
+static int previous_point(uint16_t address) {
+    (void)address;if(!s_on || !C.initialized || C.menu || cyc_mod_isolated() || R(0x26)!=C.stage)return 0;
+    for(int seat=0;seat<2;seat++)if(seat!=C.current) {
+        Player *p=&C.player[seat];
+        set_personal(p,0x3C,personal(p,0x330));set_personal(p,0x3D,personal(p,0x348));
+        set_personal(p,0x3E,personal(p,0x378));set_personal(p,0x3F,personal(p,0x390));
+    }
+    return 0;
 }
 /* Native AI runs once, borrowing the nearest living player's complete personal
  * context. Its original common collision pass handles that target; the same
@@ -391,7 +451,7 @@ static int ai_begin(uint16_t address) {
         int dy=personal(&C.player[i],0x378)-ey;int64_t distance=(int64_t)dx*dx+(int64_t)dy*dy;
         if(distance<best){best=distance;seat=i;}
     }
-    C.ai_active=1;C.ai_actor=(uint8_t)actor;C.ai_common=0;C.ai_pad[0]=R(0x14);C.ai_pad[1]=R(0x16);
+    C.ai_active=1;C.ai_actor=(uint8_t)actor;C.ai_flags=(uint8_t)(R(0x6D)==255?AI_LETTERS_FULL:0);C.ai_pad[0]=R(0x14);C.ai_pad[1]=R(0x16);
     C.current=(uint8_t)seat;project(&C.player[seat]);
     C.ai_camera_owned=0;
     /* Native AI also contains bespoke viewport checks, including the stage3
@@ -412,7 +472,7 @@ static int ai_begin(uint16_t address) {
     P(0x14,C.fresh[seat]&~0x30);P(0x16,C.raw[seat]&~0x30);return 0;
 }
 static int ai_common(uint16_t address) {
-    (void)address;if(s_on && C.ai_active && !cyc_mod_isolated())C.ai_common=1;return 0;
+    (void)address;if(s_on && C.ai_active && !cyc_mod_isolated())C.ai_flags|=AI_COMMON_COLLISION;return 0;
 }
 static int other_collision(int seat,int actor) {
     if(C.player[seat].dead || C.player[seat].teleport!=TELE_NONE || (C.withdrawn&(1u<<seat)) || !(personal(&C.player[seat],0xB0)&31) || !R(0x300+actor))return 1;
@@ -463,6 +523,7 @@ static int other_panel_collision(int seat,int actor,int type) {
 }
 static int personal_end(uint16_t address) {
     (void)address;
+    if(s_on && C.initialized && !cyc_mod_isolated() && !C.ai_active && R(0xA6)>=1 && R(0xA6)<=3 && !shared_arrow_primary(R(0xA6)))C.failures++;
     if(s_on && !cyc_mod_isolated() && !C.ai_active && R(0xA6)==4 && !shared_coil_primary())C.failures++;
     /* Finish the native loop at its common terrain-hazard check, after slot7.
      * Returning from here would incorrectly omit the player's spike checks. */
@@ -470,6 +531,10 @@ static int personal_end(uint16_t address) {
     if(s_on && C.ai_active && !cyc_mod_isolated()) {
         int type=R(0x300+C.ai_actor),panel=type>=6 && type<=8;
         int previous_gravity=personal(&C.player[C.current],0xAF),gravity=R(0xAF),flip=R(0x528)&64;
+        /* The final native letter grants Beat once to the shared roster.
+         * Later AI passes keep each body's spent weapon energy private. */
+        if(!(C.ai_flags&AI_LETTERS_FULL) && R(0x6D)==255 && R(0xBC)==0x9C)
+            for(int seat=0;seat<2;seat++)set_personal(&C.player[seat],0xBC,0x9C);
         capture(&C.player[C.current]);
         /* The remaining native AI writers are Gravity Man ($07:A040),
          * his introduction ($0A:A2C1) and boss death ($0A:A12F). Their
@@ -479,7 +544,7 @@ static int personal_end(uint16_t address) {
             set_personal(&C.player[seat],0x528,(personal(&C.player[seat],0x528)&0xBF)|flip);
         }
         if(panel) {if(!other_panel_collision(C.current^1,C.ai_actor,type))C.failures++;}
-        else if(C.ai_common && !other_collision(C.current^1,C.ai_actor))C.failures++;
+        else if((C.ai_flags&AI_COMMON_COLLISION) && !other_collision(C.current^1,C.ai_actor))C.failures++;
         if(personal(&C.player[C.current],0x30)>=9 && !C.player[C.current].dead)C.anchor=C.current;
         if(C.ai_camera_owned) {
             if(R(0x30)<9 && R(0x28)==C.ai_area[0] && R(0x29)==C.ai_area[1] && R(0x2A)==C.ai_area[2]) {
@@ -487,7 +552,7 @@ static int personal_end(uint16_t address) {
             } else C.camera_owner=C.current; /* native script keeps its camera */
             C.ai_camera_owned=0;
         }
-        C.ai_active=C.ai_common=0;C.current=C.anchor;project(&C.player[C.anchor]);
+        C.ai_active=C.ai_flags=0;C.current=C.anchor;project(&C.player[C.anchor]);
         P(0x14,C.ai_pad[0]);P(0x16,C.ai_pad[1]);deaths();
     }
     if(C.wiping){mm5_pool_abort();return 0;}
@@ -923,13 +988,22 @@ void mm5_coop_build(void) {
     /* Native rendering also owns the upper/lower-screen pit checks. */
     if(C.player[seat].teleport!=TELE_NONE){P(0xAF,0);P(0x528,R(0x528)&0xBF);}
     P(0x9F,4);for(int i=0;i<256;i+=4)P(0x200+i,248);P(0xEC,255);P(0xEE,255);P(0xEF,255);
-    uint8_t part_owner[64];memset(part_owner,255,sizeof part_owner);
+    uint8_t part_owner[64];int16_t part_camera[64];memset(part_owner,255,sizeof part_owner);
     int ok=1,body=0;
     for(int slot=0;slot<8 && ok;slot++) {
+        P(0xFC,camera);P(0xF9,camera>>8);
         if(!R(0x300+slot))continue;
+        int actor_camera=camera,wx=(R(0x348+slot)<<8)|R(0x330+slot),left[2],visible=0;
+        if(s_view && mm5_coop_view_rects(left))visible=(wx+32>=left[0] && wx-32<left[0]+256) || (wx+32>=left[1] && wx-32<left[1]+256);
+        else if(!s_view)visible=mm5_wide_contains(wx,32);
+        /* Personal projectiles/helpers belong to the complete view union.
+         * Retain the native renderer/culling outside that union, including
+         * the body's original pit checks; center only visible margin actors. */
+        if(slot && visible && (wx<camera || wx>=camera+256))actor_camera=wx-128;
+        P(0xFC,actor_camera);P(0xF9,actor_camera>>8);
         int begin=R(0x9F);CycModRegs r;cyc_mod_regs(&r);r.x=(uint8_t)slot;P(0x9E,slot);
         ok=cyc_mod_call(0xDFC3,&r);int end=R(0x9F);if(!end)end=256;
-        for(int offset=begin;offset<end;offset+=4)part_owner[offset/4]=(uint8_t)slot;
+        for(int offset=begin;offset<end;offset+=4){part_owner[offset/4]=(uint8_t)slot;part_camera[offset/4]=(int16_t)actor_camera;}
         if(!slot && end>begin){mm5_proto_body(&C.build.body);C.build.body.x+=(int16_t)(camera-C.build.camera);body=1;}
         if(end==256)break;
     }
@@ -937,7 +1011,7 @@ void mm5_coop_build(void) {
     int end=R(0x9F);if(!end)end=256;
     for(int offset=4;ok && offset<end && C.build.count<PART_CAP;offset+=4) {
         int top=R(0x200+offset)+1;if(top>=240)continue;
-        Part *p=&C.build.parts[C.build.count++];p->x=(int16_t)(camera+R(0x203+offset));p->y=(int16_t)top;
+        Part *p=&C.build.parts[C.build.count++];p->x=(int16_t)(part_camera[offset/4]+R(0x203+offset));p->y=(int16_t)top;
         p->owner=part_owner[offset/4];p->attr=R(0x202+offset);
         int tile=R(0x201+offset),table=cyc_render_line_sprite_table(top);
         for(int i=0;i<4;i++)p->colors[i]=R(0x610+(p->attr&3)*4+i)&63;
@@ -968,7 +1042,7 @@ void mm5_coop_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint
     }
 }
 void mm5_coop_power(void) { memset(&C,0,sizeof C);memset(&H,0,sizeof H);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses();mm5_hud_reset();mm5_menu_reset();mm5_pool_reset(); }
-static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage","mm5.coop.scroll-end","mm5.coop.advance","mm5.coop.retreat","mm5.coop.vertical","mm5.coop.camera","mm5.coop.menu-idle","mm5.coop.vehicle-scroll"};
+static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage","mm5.coop.scroll-end","mm5.coop.advance","mm5.coop.retreat","mm5.coop.vertical","mm5.coop.camera","mm5.coop.menu-idle","mm5.coop.vehicle-scroll","mm5.coop.previous-point"};
 void mm5_coop_set(int enabled,int roster) {
     if(mm5_net_locked())return;
     if(!enabled)helper_end();
@@ -990,7 +1064,7 @@ static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"
 static int valid(const uint8_t *in,int len) {
     if(!len)return !s_on;if(!in || len!=sizeof C)return 0;
     static Coop p;memcpy(&p,in,sizeof p);
-    if(memcmp(p.magic,"MC0D",4)||p.enabled!=s_on||p.roster!=s_roster||p.independent!=mm5_coop_independent()||p.wait_mode!=s_wait_both||p.waiting>3||((!p.enabled||!p.wait_mode)&&p.waiting)||p.initialized>1||p.anchor>1||p.camera_owner>1||p.current>1||p.menu>1||p.pauser>1||p.menu_user>1||p.menu_busy>1||p.menu_cursor[0]>15||p.menu_cursor[1]>15||p.ai_active>1||p.ai_camera_owned>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.outro>1||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
+    if(memcmp(p.magic,"MC0D",4)||p.enabled!=s_on||p.roster!=s_roster||p.independent!=mm5_coop_independent()||p.wait_mode!=s_wait_both||p.waiting>3||((!p.enabled||!p.wait_mode)&&p.waiting)||p.initialized>1||p.anchor>1||p.camera_owner>1||p.current>1||p.menu>1||p.pauser>1||p.menu_user>1||p.menu_busy>1||p.menu_cursor[0]>15||p.menu_cursor[1]>15||p.ai_active>1||p.ai_camera_owned>1||p.ai_flags>3||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.outro>1||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
     for(int seat=0;seat<2;seat++)if((p.waiting&(1u<<seat)) &&
         (p.player[seat].teleport!=TELE_HIDDEN || (p.wait_direction[seat]!=64 && p.wait_direction[seat]!=128) || p.wait_page[seat]>=0x4F))return 0;
     for(int seat=0;seat<2;seat++)if(personal(&p.player[seat],0xAF)>1)return 0;
@@ -1008,11 +1082,11 @@ static int valid(const uint8_t *in,int len) {
     return 1;
 }
 static int set(const uint8_t *in,int len) {if(!valid(in,len))return 0;if(len)memcpy(&C,in,sizeof C);else mm5_coop_power();return 1;}
-static int helper_get(uint8_t *out,int cap) {if(cap<sizeof H)return -1;memcpy(H.magic,"MHp1",4);memcpy(out,&H,sizeof H);return sizeof H;}
+static int helper_get(uint8_t *out,int cap) {if(cap<sizeof H)return -1;memcpy(H.magic,"MHp2",4);memcpy(out,&H,sizeof H);return sizeof H;}
 static int helper_valid(const uint8_t *in,int len) {
     if(!len)return !s_on;if(!in || len!=sizeof H)return 0;
     HelperPlatform h;memcpy(&h,in,sizeof h);
-    return !memcmp(h.magic,"MHp1",4) && h.active<=1 && h.seat<=1 && h.valid[0]<=1 && h.valid[1]<=1 && h.riding[0]<=1 && h.riding[1]<=1 && (!h.active || (h.slot>=5 && h.slot<=7));
+    return !memcmp(h.magic,"MHp2",4) && h.active<=1 && h.seat<=1 && h.valid[0]<=1 && h.valid[1]<=1 && h.riding[0]<=4 && h.riding[1]<=4 && h.source<=4 && h.previous_source[0]<=4 && h.previous_source[1]<=4 && h.native_riding[0]<=4 && h.native_riding[1]<=4 && (!h.active || (h.slot>=5 && h.slot<=7));
 }
 static int helper_set(const uint8_t *in,int len) {if(!helper_valid(in,len))return 0;if(len)memcpy(&H,in,sizeof H);else memset(&H,0,sizeof H);return 1;}
 void mm5_coop_register(void) {
@@ -1029,6 +1103,7 @@ void mm5_coop_register(void) {
     nes_mod_register_function_entry_plugin(HOOKS[12],0xDEC3,before_camera);
     nes_mod_register_function_entry_plugin(HOOKS[13],0x80A3,menu_idle);
     nes_mod_register_function_entry_plugin(HOOKS[14],0xCA03,vehicle_scroll);
+    nes_mod_register_function_entry_plugin(HOOKS[15],0xDEF3,previous_point);
     nes_mod_register_savestate_hook("mm5.coop",get,set);nes_mod_register_savestate_validator("mm5.coop",valid);
     nes_mod_register_savestate_hook("mm5.coop-helper",helper_get,helper_set);nes_mod_register_savestate_validator("mm5.coop-helper",helper_valid);
 }
