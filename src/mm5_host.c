@@ -5,6 +5,7 @@
 #include "mm5_wide.h"
 #include "mm5_coop.h"
 #include "mm5_net.h"
+#include "mm5_pool.h"
 #include "cyc_host_extras.h"
 #include "cyc_core.h"
 #include "cyc_input.h"
@@ -68,6 +69,7 @@ NES_MOD_CONSTRUCTOR(register_mm5) {
     mm5_proto_register();
     mm5_wide_register();
     mm5_coop_register();
+    mm5_pool_register();
     nes_mod_register_function_entry_plugin("mm5.player", 0xDEB1, mm5_weapons_dispatch);
     nes_mod_register_reset_callback(reset);
     nes_mod_register_activation_plugin("mega-man-5-usa.weapons", activate_weapons);
@@ -87,6 +89,7 @@ static void end(void *ctx) {
         n = (int)strlen(fields); fields[n++] = ','; mm5_wide_json(fields+n,sizeof fields-n);
         n = (int)strlen(fields); fields[n++] = ','; mm5_coop_json(fields+n,sizeof fields-n);
         n = (int)strlen(fields); fields[n++] = ','; mm5_view_json(fields+n,sizeof fields-n);
+        n = (int)strlen(fields); fields[n++] = ','; mm5_pool_json(fields+n,sizeof fields-n);
         n = (int)strlen(fields);snprintf(fields+n,sizeof fields-n,",\"timing\":{\"extra_lines\":%u}",cyc_extra_scanlines());
         fprintf(s_log, "{\"frame\":%u,%s}\n", cyc_ring_frame, fields);
     }
@@ -137,15 +140,23 @@ static bool option(void *ctx, const char *name, const char *value) {
     mm5_weapons_set(!strcmp(value, "on")); return true;
 }
 static void state(int id, const char *line) {
-    (void)line; char fields[4096]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
+    char view[16];
+    if(cyc_tcp_str(line,"view",view,sizeof view)) {
+        int mode=!strcmp(view,"shared")?0:!strcmp(view,"split")?1:!strcmp(view,"p1")?2:!strcmp(view,"p2")?3:-1;
+        if(mode<0 || !mm5_coop_enabled()){cyc_tcp_err(id,"view needs active co-op and shared|split|p1|p2");return;}
+        mm5_coop_view_set(mode);
+        if(mm5_coop_view_mode()!=mode){cyc_tcp_err(id,"the active network simulation locks this view policy");return;}
+    }
+    char fields[4096]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
     mm5_proto_json(fields + n, sizeof fields - n);
     n = (int)strlen(fields); fields[n++] = ','; mm5_wide_json(fields+n,sizeof fields-n);
     n = (int)strlen(fields); fields[n++] = ','; mm5_coop_json(fields+n,sizeof fields-n);
     n = (int)strlen(fields); fields[n++] = ','; mm5_view_json(fields+n,sizeof fields-n);
+    n = (int)strlen(fields); fields[n++] = ','; mm5_pool_json(fields+n,sizeof fields-n);
     n = (int)strlen(fields);snprintf(fields+n,sizeof fields-n,",\"timing\":{\"extra_lines\":%u}",cyc_extra_scanlines());
     cyc_tcp_ok(id, fields);
 }
-static void tcp(void *ctx) { (void)ctx; cyc_tcp_register("mm5_state", "MM5 native player and weapon adapter state", state); }
+static void tcp(void *ctx) { (void)ctx; cyc_tcp_register("mm5_state", "MM5 state; optional view shared|split|p1|p2 uses the native view adapter", state); }
 const CycHostExtras *cyc_host_extras(void) {
     static const CycInputProfile profile = {
         .id = "megaman-weapons-1", .game_label = {"Previous weapon (L)", "Next weapon (R)"},

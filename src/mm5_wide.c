@@ -5,6 +5,7 @@
 #include "mm5_proto.h"
 #include "mm5_coop.h"
 #include "mm5_net.h"
+#include "mm5_pool.h"
 #include "cyc_mod.h"
 #include "cyc_render.h"
 #include "cyc_video.h"
@@ -17,10 +18,10 @@
 #define P(a,v) cyc_mod_poke((uint16_t)(a),(uint8_t)(v))
 /* One native render call can emit63 pieces; retain all24 actors, rather than
  * imposing a second scene-wide OAM limit in the host packet. */
-enum { MAX_PARTS = 24 * 63 };
+enum { MAX_PARTS = MM5_RENDER_OWNERS * 63 };
 typedef struct { int16_t x,y; uint8_t owner,attr,pixels[64]; } WidePart;
 typedef struct {
-    uint8_t valid,rank[24],next_rank,extended;
+    uint8_t valid,rank[MM5_RENDER_OWNERS],next_rank,extended;
     uint16_t count,width,camera;
     int16_t left;
     uint16_t room_left,room_right;
@@ -67,6 +68,11 @@ void mm5_wide_begin(void) {
     S.build.extended=(uint8_t)extended;
     S.build.left=(int16_t)left; S.build.room_left=(uint16_t)lo; S.build.room_right=(uint16_t)hi;
 }
+int mm5_wide_contains(int x,int radius) {
+    int camera,left,lo,hi,width=mm5_net_simulation_width(cyc_video_width());
+    if(!geometry(width,&camera,&left,&lo,&hi)){left=R(0xF9)*256+R(0xFC);width=256;}
+    return x+radius>=left && x-radius<left+width;
+}
 void mm5_wide_latch(void) { S.frame=S.build; }
 static uint8_t pattern(const uint8_t banks[6], int address) {
     int bank;
@@ -76,17 +82,16 @@ static uint8_t pattern(const uint8_t banks[6], int address) {
     else bank=banks[2+((address-0x1000)>>10)];
     return mm5_cart_chr(bank,address);
 }
-static int actor(uint16_t address) {
-    (void)address;
+static int capture_actor(int slot,int owner,int extra) {
     if (!S.build.valid || cyc_mod_isolated()) return 0;
-    CycModRegs regs; cyc_mod_regs(&regs); int slot=regs.x;
+    CycModRegs regs; cyc_mod_regs(&regs);
     if (slot>=24) return 0;
     int complete=s_no_flicker || mm5_coop_independent();
-    S.build.rank[slot]=complete?(uint8_t)slot:S.build.next_rank++;
+    S.build.rank[owner]=extra?(uint8_t)owner:complete?(uint8_t)slot:S.build.next_rank++;
     int wx=(R(0x348+slot)<<8)|R(0x330+slot), dx=wx-S.build.camera;
     int visible=mm5_coop_independent()?in_views(wx,32):(wx+32>=S.build.left && wx-32<S.build.left+S.build.width);
     int widened=S.build.extended && slot && !(dx>=32 && dx<224) && visible;
-    if(!R(0x300+slot) || (!complete && !widened))return 0;
+    if(!R(0x300+slot) || (!complete && !widened && !extra))return 0;
     if (!cyc_mod_isolate_begin()) { S.failed++; return 0; }
     int saved_count=S.build.count;
     int camera=wx-128; P(0xFC,camera); P(0xF9,camera>>8); P(0x9E,slot); P(0x9F,4);
@@ -109,7 +114,7 @@ static int actor(uint16_t address) {
         if (S.build.count==MAX_PARTS) { S.full++; break; }
         WidePart *p=&S.build.parts[S.build.count++];
         p->x=(int16_t)(wx+R(0x203+offset)-128); p->y=(int16_t)top;
-        p->owner=(uint8_t)slot; p->attr=R(0x202+offset);
+        p->owner=(uint8_t)owner; p->attr=R(0x202+offset);
         int tile=R(0x201+offset), table=cyc_render_line_sprite_table(top);
         for (int y=0;y<8;y++) {
             int row=(p->attr&128)?7-y:y, a=table+tile*16+row;
@@ -123,9 +128,11 @@ static int actor(uint16_t address) {
     /* Widened offscreen actors replace the cartridge's culling pass. For
      * ordinary actors, the real call still owns animation, palette and death
      * effects exactly once; the isolated call only retained complete art. */
-    if(widened) {n=0;for(int base=0x300;base<=0x5B8;base+=0x18)P(base+slot,fields[n++]);return 1;}
+    if(widened || extra) {n=0;for(int base=0x300;base<=0x5B8;base+=0x18)P(base+slot,fields[n++]);return extra?0:1;}
     return 0;
 }
+static int actor(uint16_t address){(void)address;CycModRegs r;cyc_mod_regs(&r);return capture_actor(r.x,r.x,0);}
+void mm5_wide_capture_extra(int slot,int index){if(index>=0 && index<16)capture_actor(slot,24+index,1);}
 static int spawn(uint16_t address) {
     (void)address;
     if (cyc_mod_isolated()) return 0;
@@ -142,10 +149,10 @@ static int spawn(uint16_t address) {
         if(mm5_coop_independent()){if(!in_views(wx,24))continue;}
         else if(wx+24<left || wx-24>=left+width)continue;
         if (wx>=camera && wx<camera+256) continue; /* native traversal owns its rectangle */
-        int active=0,free_slot=0;
+        int active=mm5_pool_authored(index),free_slot=0;
         for (int slot=8;slot<24;slot++) { if (!R(0x300+slot)) free_slot=1; else if (R(0x438+slot)==index) active=1; }
         if (active || (R(0x100+(index>>3))&(0x80>>(index&7)))) continue;
-        if (!free_slot) { S.full++; continue; }
+        if (!free_slot && !mm5_pool_make_room()) { S.full++; continue; }
         if (!cyc_mod_isolate_begin()) { S.failed++; continue; }
         CycModRegs r; cyc_mod_regs(&r); r.a=0x1B;
         int ok=cyc_mod_call(0xFF3D,&r); P(0xF6,stage);
@@ -201,7 +208,7 @@ int mm5_wide_background(uint32_t *out,int width,int height,const uint32_t *nativ
     }
     return 1;
 }
-int mm5_wide_rank(int owner) { return owner>=0 && owner<24 && S.frame.valid?S.frame.rank[owner]:255; }
+int mm5_wide_rank(int owner) { return owner>=0 && owner<MM5_RENDER_OWNERS && S.frame.valid?S.frame.rank[owner]:255; }
 int mm5_wide_camera(void) {return S.frame.camera;}
 void mm5_wide_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint8_t *claimed,int rank) {
     int complete=s_no_flicker || mm5_coop_independent();
@@ -245,17 +252,17 @@ void mm5_wide_views_changed(void) {
     nes_mod_set_function_hook_enabled("mm5.wide.spawn",s_on || mm5_coop_enabled());
 }
 void mm5_wide_power(void) { memset(&S,0,sizeof S); }
-static int get(uint8_t *out,int cap) { if (cap<sizeof S)return -1;memcpy(S.magic,"MX02",4);S.enabled=(uint8_t)s_on;S.noflicker=(uint8_t)s_no_flicker;memcpy(out,&S,sizeof S);return sizeof S; }
+static int get(uint8_t *out,int cap) { if (cap<sizeof S)return -1;memcpy(S.magic,"MX03",4);S.enabled=(uint8_t)s_on;S.noflicker=(uint8_t)s_no_flicker;memcpy(out,&S,sizeof S);return sizeof S; }
 static int valid(const uint8_t *in,int len) {
     if (!len)return !(s_on || s_no_flicker);
     if (!in || len!=sizeof S)return 0;
     static WideState p;memcpy(&p,in,sizeof p);
-    if (memcmp(p.magic,"MX02",4) || p.enabled!=s_on || p.noflicker!=s_no_flicker)return 0;
+    if (memcmp(p.magic,"MX03",4) || p.enabled!=s_on || p.noflicker!=s_no_flicker)return 0;
     const WideFrame *f[2]={&p.build,&p.frame};
     for(int j=0;j<2;j++) {
         if(f[j]->valid>1 || f[j]->extended>1 || f[j]->count>MAX_PARTS || f[j]->width>CYC_VIDEO_MAX_WIDTH ||
             f[j]->body.pose>=CYC_PROTO_POSE_COUNT || f[j]->body.active>1 || f[j]->body.right>1 || f[j]->body.flipped>1 || f[j]->body.behind>1)return 0;
-        for(int i=0;i<f[j]->count;i++) { if(f[j]->parts[i].owner>=24)return 0;for(int k=0;k<64;k++)if(f[j]->parts[i].pixels[k]>3)return 0; }
+        for(int i=0;i<f[j]->count;i++) { if(f[j]->parts[i].owner>=MM5_RENDER_OWNERS)return 0;for(int k=0;k<64;k++)if(f[j]->parts[i].pixels[k]>3)return 0; }
     }
     return 1;
 }

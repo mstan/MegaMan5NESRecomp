@@ -8,6 +8,7 @@
 #include "mm5_wide.h"
 #include "mm5_net.h"
 #include "mm5_menu.h"
+#include "mm5_pool.h"
 #include "cyc_mod.h"
 #include "cyc_render.h"
 #include "cyc_ring.h"
@@ -39,7 +40,7 @@ typedef struct {
     uint64_t transitions,arrivals[2];
 } Coop;
 static Coop C;
-static int s_on,s_requested,s_roster,s_scope,s_personal_bhv,s_view,s_saved_mode=-1,s_saved_width;
+static int s_on,s_requested,s_roster,s_scope,s_personal_bhv,s_view;
 static uint16_t s_addr[PERSONAL_CAP],s_index[2048];
 static int s_count;
 static int checkpoint_at(int screen);
@@ -73,14 +74,9 @@ void mm5_coop_view_set(int mode) {
     if(mode<0 || mode>3)return;
     if(mm5_net_locked() && (mode!=0)!=mm5_coop_independent())return;
     s_view=mode;mm5_world_shadow_set(mm5_coop_enabled());
+    mm5_view_coop(s_on); /* Same-width P1/P2 changes must recompose a paused frame. */
     mm5_wide_views_changed();
-    if(mm5_coop_independent()) {
-        if(s_saved_mode<0){s_saved_mode=cyc_video_mode();s_saved_width=cyc_video_width();}
-        cyc_video_request_width(s_view==1?512:256);
-    } else if(s_saved_mode>=0) {
-        if(s_saved_mode==NES_VIDEO_STOCK)cyc_video_request_width(s_saved_width);else cyc_video_set_mode(s_saved_mode);
-        s_saved_mode=-1;
-    }
+    cyc_video_override_width(mm5_coop_independent()?(s_view==1?512:256):0);
 }
 int mm5_coop_view_rects(int left[2]) {
     if(!s_on || !C.initialized || R(0x26)!=C.stage)return 0;
@@ -371,9 +367,10 @@ static int personal_end(uint16_t address) {
         C.ai_active=C.ai_common=0;C.current=C.anchor;project(&C.player[C.anchor]);
         P(0x14,C.ai_pad[0]);P(0x16,C.ai_pad[1]);deaths();
     }
-    return 0;
+    if(C.wiping){mm5_pool_abort();return 0;}
+    return mm5_pool_next(address);
 }
-static int world_begin(uint16_t address) { (void)address;if(s_on && C.initialized && !cyc_mod_isolated())C.world_updates++;return 0; }
+static int world_begin(uint16_t address) { (void)address;if(s_on && C.initialized && !cyc_mod_isolated()){C.world_updates++;mm5_pool_begin();}return 0; }
 static int stage_load(uint16_t address) {
     (void)address;if(!s_on || cyc_mod_isolated())return 0;
     if(C.initialized) {
@@ -774,17 +771,17 @@ void mm5_coop_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint
         }
     }
 }
-void mm5_coop_power(void) { memset(&C,0,sizeof C);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses();mm5_hud_reset();mm5_menu_reset(); }
+void mm5_coop_power(void) { memset(&C,0,sizeof C);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses();mm5_hud_reset();mm5_menu_reset();mm5_pool_reset(); }
 static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage","mm5.coop.scroll-end","mm5.coop.advance","mm5.coop.retreat","mm5.coop.vertical","mm5.coop.camera","mm5.coop.menu-idle"};
 void mm5_coop_set(int enabled,int roster) {
     if(mm5_net_locked())return;
     s_requested=enabled!=0;
     /* A catalog reapply disables and reenables features synchronously. Keep
      * the live personal contexts; an actual disabled frame retires them. */
-    if(!enabled && C.menu)return;
+    if(!enabled && (C.menu || C.ai_active || mm5_pool_busy()))return;
     if(enabled)mm5_proto_cancel_swap();
     if(!enabled && C.initialized && C.current!=C.anchor){capture(&C.player[C.current]);C.current=C.anchor;project(&C.player[C.anchor]);}
-    s_on=enabled!=0;s_roster=roster!=0;
+    s_on=enabled!=0;s_roster=roster!=0;if(!enabled)mm5_pool_disable();else mm5_pool_refresh();
     mm5_hud_reset();
     mm5_menu_reset();
     for(int i=0;i<sizeof HOOKS/sizeof *HOOKS;i++)nes_mod_set_function_hook_enabled(HOOKS[i],s_on);

@@ -1,5 +1,8 @@
 #pragma once
 #include <stdint.h>
+enum {MM5_RENDER_OWNERS=40};
+void mm5_wide_capture_extra(int slot,int index);
+int mm5_wide_contains(int world_x,int radius);
 void mm5_wide_register(void);
 void mm5_wide_power(void);
 void mm5_wide_set(int enabled, const char *aspect);

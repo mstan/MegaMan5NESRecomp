@@ -201,3 +201,45 @@ id = "mm5.coop.camera"
 addr = 0xDEC3
 length = 8
 crc32 = 0xB201264B
+
+[[mod_function_hook]]
+id = "mm5.world.pool-x"
+addr = 0xF15F
+length = 8
+crc32 = 0x5E1051E7
+
+[[mod_function_hook]]
+id = "mm5.world.pool-y"
+addr = 0xF16F
+length = 8
+crc32 = 0xBCCA3444
+
+[[mod_function_hook]]
+id = "mm5.world.pool-authored"
+addr = 0x9995
+length = 8
+crc32 = 0xCE350A51
+
+[[mod_function_hook]]
+id = "mm5.world.pool-clear"
+addr = 0xC39D
+length = 8
+crc32 = 0xFB9958BD
+
+[[mod_function_hook]]
+id = "mm5.world.pool-begin"
+addr = 0x8000
+length = 8
+crc32 = 0xDD87F922
+
+[[mod_function_hook]]
+id = "mm5.world.pool-tail"
+addr = 0x8039
+length = 8
+crc32 = 0x7D3B8EE9
+
+[[mod_function_hook]]
+id = "mm5.world.pool-birth"
+addr = 0x8D6C
+length = 8
+crc32 = 0x3272D34C

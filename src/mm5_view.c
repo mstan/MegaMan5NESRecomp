@@ -4,6 +4,7 @@
 #include "mm5_wide.h"
 #include "mm5_coop.h"
 #include "mm5_hud.h"
+#include "mm5_pool.h"
 #include "mm5_menu.h"
 #include "cyc_mod.h"
 #include "cyc_render.h"
@@ -49,6 +50,7 @@ static int begin(uint16_t address) {
     (void)address;
     memset(&s_build, 0, sizeof s_build); memset(s_build.owners, 255, sizeof s_build.owners);
     mm5_wide_begin();
+    mm5_pool_render_begin();
     mm5_coop_build();
     panels_build();
     return 0;
@@ -63,6 +65,7 @@ static int part(uint16_t address) {
 }
 static int dma(uint16_t address) {
     (void)address;
+    mm5_pool_draw();
     memcpy(&s_frame, &s_build, sizeof s_frame);
     mm5_wide_latch();
     mm5_coop_latch();
@@ -179,7 +182,7 @@ static void panel_scene(uint32_t *out,int seat) {
         out[at]=cyc_render_color(v?s_frame.palettes[seat][y/8][cell]*4+v:0);s_opaque[at]=(uint8_t)(v!=0);
     }
     int native_camera=mm5_wide_camera(),origin=native_camera-left;
-    for(int rank=0;rank<24;rank++) {
+    for(int rank=0;rank<MM5_RENDER_OWNERS;rank++) {
         mm5_wide_draw(out,256,origin,s_opaque,s_claimed,rank);
         if(!rank)mm5_coop_draw(out,256,origin,s_opaque,s_claimed);
     }

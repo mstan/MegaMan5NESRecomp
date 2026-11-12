@@ -43,6 +43,7 @@ nesrecomp_add_cycle_game(MegaMan5Recomp
     HOST_EXTRAS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_host.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_net.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_pool.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_cart.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_world.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_coop.c"

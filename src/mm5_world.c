@@ -1,6 +1,7 @@
 /* MM5's cartridge-native block/metatile decoder and conformance check. */
 #include "mm5_world.h"
 #include "mm5_cart.h"
+#include "mm5_pool.h"
 #include "cyc_mod.h"
 #include "cyc_render.h"
 #include "cyc_ring.h"
@@ -46,6 +47,8 @@ static int terrain_reset(uint16_t address) {
 void mm5_world_power(void) {memset(&T,0,sizeof T);T.stage=255;}
 void mm5_world_shadow_set(int enabled) {
     enabled=enabled!=0;
+    if(s_shadow && !enabled && R(0x26)<16)for(int page=R(0xF9);page<R(0xF9)+2 && page<0x4F;page++)
+        for(int n=0;n<32;n++)cyc_mod_poke((uint16_t)(0x680+(page&1)*32+n),T.bits[page][n]);
     int stage=R(0x26)==16 && R(0x59)?R(0x7A3):R(0x26);
     if(enabled && !s_shadow && T.stage!=stage) {
         memset(T.bits,0,sizeof T.bits);
@@ -58,8 +61,8 @@ void mm5_world_shadow_set(int enabled) {
     nes_mod_set_function_hook_enabled("mm5.world.restore",s_shadow);
     nes_mod_set_function_hook_enabled("mm5.world.reset",s_shadow);
 }
-void mm5_world_private_begin(void) {if(s_shadow)memcpy(s_saved_bits,T.bits,sizeof T.bits);}
-void mm5_world_private_end(int commit) {if(s_shadow && !commit)memcpy(T.bits,s_saved_bits,sizeof T.bits);}
+void mm5_world_private_begin(void) {if(s_shadow)memcpy(s_saved_bits,T.bits,sizeof T.bits);mm5_pool_private_begin();}
+void mm5_world_private_end(int commit) {if(s_shadow && !commit)memcpy(T.bits,s_saved_bits,sizeof T.bits);mm5_pool_private_end(commit);}
 static int terrain_get(uint8_t *out,int cap) {
     if(cap<sizeof T)return -1;memcpy(T.magic,"MT02",4);T.enabled=(uint8_t)s_shadow;memcpy(out,&T,sizeof T);return sizeof T;
 }

@@ -98,7 +98,7 @@ static int settings_apply(const char *value) {
 static void settings_restore(void) {
     s_sealed=0;if(s_saved){
         mm5_host_apply_settings(s_offline,0);mm5_coop_view_set(s_offline_view);
-        if(s_offline_video==NES_VIDEO_STOCK)cyc_video_request_width(s_offline_width);else cyc_video_set_mode(s_offline_video);
+        if(s_offline_video==NES_VIDEO_STOCK && !s_offline.independent)cyc_video_request_width(s_offline_width);else cyc_video_set_mode(s_offline_video);
         s_saved=0;
     }
     nes_netplay_require_capabilities(0);nes_netplay_require_player_count(0);nes_netplay_set_input_player(-1);
