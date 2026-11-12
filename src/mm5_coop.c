@@ -41,6 +41,11 @@ typedef struct {
     uint8_t wait_direction[2],wait_page[2],wait_out[2],wait_flags[2];
 } Coop;
 static Coop C;
+typedef struct {
+    char magic[4];uint8_t active,slot,seat,reserved,original[30];
+    int16_t previous_x[2];uint8_t valid[2],riding[2];
+} HelperPlatform;
+static HelperPlatform H;
 static int s_on,s_requested,s_roster,s_scope,s_personal_bhv,s_view,s_wait_both;
 static uint16_t s_addr[PERSONAL_CAP],s_index[2048];
 static int s_count;
@@ -51,6 +56,10 @@ static void scene_shift(void);
 static void outro_tick(void);
 static void finish_wait(void);
 static int partner_present(int seat);
+static void helper_end(void);
+static int helper_address(int a) {
+    return H.active && a>=0x300 && a<0x5D0 && (a-0x300)%24==H.slot;
+}
 static void reset_select(void) {
     memset(C.select_hold,0,sizeof C.select_hold);memset(C.select_armed,0,sizeof C.select_armed);
 }
@@ -122,10 +131,69 @@ static void addresses(void) {
     s_addr[s_count++]=0xAF; /* Native panel gravity belongs to its touching body. */
     for(int i=0;i<s_count;i++)s_index[s_addr[i]]=(uint16_t)(i+1);
 }
-static void capture(Player *p) { for(int i=0;i<s_count;i++)p->ram[i]=R(s_addr[i]); }
-static void project(const Player *p) { for(int i=0;i<s_count;i++)P(s_addr[i],p->ram[i]); }
+static void capture(Player *p) { for(int i=0;i<s_count;i++)if(!helper_address(s_addr[i]))p->ram[i]=R(s_addr[i]); }
+static void project(const Player *p) {
+    if(H.active && p!=&C.player[H.seat])helper_end();
+    for(int i=0;i<s_count;i++)if(!helper_address(s_addr[i]))P(s_addr[i],p->ram[i]);
+}
 static int personal(const Player *p,int a) { int i=s_index[a];return i?p->ram[i-1]:R(a); }
 static void set_personal(Player *p,int a,int value) { int i=s_index[a];if(i)p->ram[i-1]=(uint8_t)value; }
+static void helper_begin(void) {
+    if(H.active || !s_on || !C.initialized || C.scene_active || C.follow || R(0x30)>1 || C.player[C.current].teleport)return;
+    int owner=C.current^1;const Player *p=&C.player[owner];
+    int type=personal(p,0x304),flags=personal(p,0x52C);
+    if(p->dead || p->teleport || (C.withdrawn&(1u<<owner)) || !(personal(p,0xB0)&31) ||
+       (type!=2 && type!=0x45) || !(flags&128) || !(flags&1) || (flags&4)) {
+        H.valid[owner]=H.riding[C.current]=0;return;
+    }
+    /* A rider already using their own Rush keeps that native platform. */
+    if(R(0x4C8)==4 && (R(0x304)==2 || R(0x304)==0x45) && (R(0x52C)&1)) {H.riding[C.current]=0;return;}
+    int slot;for(slot=7;slot>=5;slot--)if(!R(0x300+slot))break;
+    if(slot<5){H.riding[C.current]=0;return;}
+    int x=(personal(p,0x34C)<<8)|personal(p,0x334),delta=H.valid[owner]?x-H.previous_x[owner]:0;
+    H.previous_x[owner]=(int16_t)x;H.valid[owner]=1;
+    if(delta< -8 || delta>8)delta=0;
+    H.active=1;H.slot=(uint8_t)slot;H.seat=C.current;
+    for(int f=0;f<30;f++) {H.original[f]=R(0x300+f*24+slot);P(0x300+f*24+slot,personal(p,0x304+f*24));}
+    /* Native Jet AI writes its pilot's conveyor/push fields. A passenger
+     * receives the same actual displacement; the owner alone steers/spends. */
+    if(type==0x45 && H.riding[C.current]) {
+        P(0x39,delta<0?2:delta>0?1:0);P(0x3A,0);P(0x3B,delta<0?-delta:delta);
+    }
+}
+static void helper_end(void) {
+    if(!H.active)return;
+    H.riding[H.seat]=(uint8_t)(R(0x4C8)==H.slot);
+    int slot=H.slot;H.active=0;
+    for(int f=0;f<30;f++)P(0x300+f*24+slot,H.original[f]);
+    H.slot=H.seat=0;memset(H.original,0,sizeof H.original);
+}
+/* The owner already ran Coil AI once. If its native contact did not trigger,
+ * let that same waiting contact routine inspect the other live body. */
+static int shared_coil_in_scope(void) {
+    if(R(0x304)!=2 || R(0x58C)!=0xA2 || R(0x5A4)!=0xB1)return 1;
+    const Player *p=&C.player[C.current^1];
+    if(p->dead || p->teleport || (C.withdrawn&(1u<<(C.current^1))) || !(personal(p,0xB0)&31) || personal(p,0x30)>1 || personal(p,0x390))return 1;
+    int dx=((R(0x34C)<<8)|R(0x334))-((personal(p,0x348)<<8)|personal(p,0x330));
+    if(dx<=-7 || dx>=7 || (int)R(0x37C)-personal(p,0x378)<12)return 1;
+    uint8_t original[30],state=R(0x30),gravity=R(0xAF);
+    for(int f=0;f<30;f++){original[f]=R(0x300+f*24);P(0x300+f*24,personal(p,0x300+f*24));}
+    P(0x30,personal(p,0x30));P(0xAF,personal(p,0xAF));P(0xF6,0x1D);
+    CycModRegs r;cyc_mod_regs(&r);int ok=cyc_mod_call(0xFF43,&r);r.x=4;
+    if(ok)ok=cyc_mod_call(0xB1A2,&r); /* Original spring and B5E8 owner cost. */
+    for(int f=0;f<30;f++)P(0x300+f*24,original[f]);
+    P(0x30,state);P(0xAF,gravity);return ok;
+}
+static int shared_coil_primary(void) {
+    if(R(0x304)!=2 || R(0x58C)!=0xA2 || R(0x5A4)!=0xB1)return 1;
+    uint8_t before[2048],after[2048];
+    for(int a=0;a<2048;a++)before[a]=R(a);
+    if(!cyc_mod_isolate_begin())return 0;
+    int ok=shared_coil_in_scope();for(int a=0;a<2048;a++)after[a]=R(a);
+    cyc_mod_isolate_end();
+    if(ok)for(int i=0;i<s_count;i++){int a=s_addr[i];if(before[a]!=after[a])P(a,after[a]);}
+    return ok;
+}
 int mm5_coop_read(int seat,uint16_t a) {
     if(a>=2048 || seat<0 || seat>1)return 0;
     return C.initialized && seat!=C.current?personal(&C.player[seat],a):R(a);
@@ -214,6 +282,7 @@ static int private_step(int seat) {
     s_scope=1;int enabled=hooks(1),ok=enabled;CycModRegs r;cyc_mod_regs(&r);r.a=0x1B;
     if(ok)ok=cyc_mod_call(0xFF3D,&r);
     mm5_weapons_dispatch(0xDEB1);
+    helper_begin();
     if(ok && p->teleport==TELE_IN && R(0x378)<p->arrival_floor) {
         /* Native acceleration and subpixel movement carry the returning beam
          * through overhead terrain. Open at the checked destination floor. */
@@ -233,8 +302,10 @@ static int private_step(int seat) {
          * can be higher: enter its native landing/opening tail directly. */
         r.x=0;ok=cyc_mod_call(0x859B,&r);
     } else if(ok)ok=cyc_mod_call(0x8000,&r);
+    helper_end();
     if(ok) {r.a=0x1C;ok=cyc_mod_call(0xFF3D,&r);P(0xF6,C.stage);if(ok)ok=cyc_mod_call(0xFF43,&r);}
     s_personal_bhv=1;if(ok)ok=cyc_mod_call(0x8000,&r);s_personal_bhv=0;
+    if(ok)ok=shared_coil_in_scope();
     if(ok) {
         if(p->teleport==TELE_IN && R(0x30)!=8) {
             p->teleport=TELE_NONE;P(0x5B8,60);
@@ -294,10 +365,11 @@ static int controller(uint16_t address) {
     }
     if(R(0x30)<=8 && !private_step(C.anchor^1))C.failures++;
     C.current=C.anchor;P(0x14,C.raw[C.anchor]&~C.player[C.anchor].previous&~0x30);P(0x16,C.raw[C.anchor]&~0x30);
-    P(0x15,0);P(0x17,0);return 0;
+    P(0x15,0);P(0x17,0);helper_begin();return 0;
 }
 static int after_controller(uint16_t address) {
     (void)address;if(s_on && C.initialized && !cyc_mod_isolated() && !C.menu) {
+        helper_end();
         limit_shared();capture(&C.player[C.anchor]);C.updates[C.anchor]++;C.last_step[C.anchor]=cyc_ring_frame;
     }return 0;
 }
@@ -391,6 +463,7 @@ static int other_panel_collision(int seat,int actor,int type) {
 }
 static int personal_end(uint16_t address) {
     (void)address;
+    if(s_on && !cyc_mod_isolated() && !C.ai_active && R(0xA6)==4 && !shared_coil_primary())C.failures++;
     /* Finish the native loop at its common terrain-hazard check, after slot7.
      * Returning from here would incorrectly omit the player's spike checks. */
     if(s_on && s_scope && s_personal_bhv && R(0xA6)>=7)P(0xA6,23);
@@ -894,10 +967,11 @@ void mm5_coop_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint
         }
     }
 }
-void mm5_coop_power(void) { memset(&C,0,sizeof C);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses();mm5_hud_reset();mm5_menu_reset();mm5_pool_reset(); }
+void mm5_coop_power(void) { memset(&C,0,sizeof C);memset(&H,0,sizeof H);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses();mm5_hud_reset();mm5_menu_reset();mm5_pool_reset(); }
 static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage","mm5.coop.scroll-end","mm5.coop.advance","mm5.coop.retreat","mm5.coop.vertical","mm5.coop.camera","mm5.coop.menu-idle","mm5.coop.vehicle-scroll"};
 void mm5_coop_set(int enabled,int roster) {
     if(mm5_net_locked())return;
+    if(!enabled)helper_end();
     s_requested=enabled!=0;
     /* A catalog reapply disables and reenables features synchronously. Keep
      * the live personal contexts; an actual disabled frame retires them. */
@@ -934,6 +1008,13 @@ static int valid(const uint8_t *in,int len) {
     return 1;
 }
 static int set(const uint8_t *in,int len) {if(!valid(in,len))return 0;if(len)memcpy(&C,in,sizeof C);else mm5_coop_power();return 1;}
+static int helper_get(uint8_t *out,int cap) {if(cap<sizeof H)return -1;memcpy(H.magic,"MHp1",4);memcpy(out,&H,sizeof H);return sizeof H;}
+static int helper_valid(const uint8_t *in,int len) {
+    if(!len)return !s_on;if(!in || len!=sizeof H)return 0;
+    HelperPlatform h;memcpy(&h,in,sizeof h);
+    return !memcmp(h.magic,"MHp1",4) && h.active<=1 && h.seat<=1 && h.valid[0]<=1 && h.valid[1]<=1 && h.riding[0]<=1 && h.riding[1]<=1 && (!h.active || (h.slot>=5 && h.slot<=7));
+}
+static int helper_set(const uint8_t *in,int len) {if(!helper_valid(in,len))return 0;if(len)memcpy(&H,in,sizeof H);else memset(&H,0,sizeof H);return 1;}
 void mm5_coop_register(void) {
     mm5_hud_register();
     mm5_menu_register();
@@ -949,6 +1030,7 @@ void mm5_coop_register(void) {
     nes_mod_register_function_entry_plugin(HOOKS[13],0x80A3,menu_idle);
     nes_mod_register_function_entry_plugin(HOOKS[14],0xCA03,vehicle_scroll);
     nes_mod_register_savestate_hook("mm5.coop",get,set);nes_mod_register_savestate_validator("mm5.coop",valid);
+    nes_mod_register_savestate_hook("mm5.coop-helper",helper_get,helper_set);nes_mod_register_savestate_validator("mm5.coop-helper",helper_valid);
 }
 int mm5_coop_json(char *out,int cap) {
     return snprintf(out,cap,"\"coop\":{\"on\":%d,\"ready\":%u,\"anchor\":%u,\"menu\":%u,\"pauser\":%u,\"world\":%llu,\"updates\":[%llu,%llu],\"failed\":%llu,\"combat\":[[%llu,%llu],[%llu,%llu]],\"deaths\":[%llu,%llu],\"handoffs\":%llu,\"wipes\":%llu,\"targets\":[%llu,%llu],\"checks\":%llu,\"shots\":[[%d,%d,%d],[%d,%d,%d]],\"transport\":[%u,%u,%u,%u,%u],\"withdrawals\":[%llu,%llu],\"rejoins\":[%llu,%llu],\"revivals\":[%llu,%llu],\"scene\":[%u,%u,%u,%u],\"transitions\":%llu,\"outro\":%u,\"arrivals\":[%llu,%llu],\"pages\":[%d,%d],\"boss\":[%u,%u,%u],\"progress\":[%u,%u,%u,%u,%u],\"lives\":%u,\"tanks\":[%u,%u],\"coil\":[%d,%d],\"napalm\":[%d,%d],\"actor8\":[%u,%u,%u,%u,%u],\"wait_both\":%d,\"waiting\":%u,\"players\":[[%d,%d,%d,%d,%d],[%d,%d,%d,%d,%d]]}",
