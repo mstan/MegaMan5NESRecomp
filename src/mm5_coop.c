@@ -67,7 +67,12 @@ int mm5_coop_character(void) { return s_on?(s_roster^C.current):-1; }
 int mm5_coop_character_at(int seat) {return s_on && seat>=0 && seat<2?(s_roster^seat):0;}
 int mm5_coop_view_mode(void) {return s_on?s_view:0;}
 int mm5_coop_independent(void) {return s_on && s_view!=0;}
-int mm5_coop_scene_locked(void) {return C.scene_active || C.follow || C.outro;}
+int mm5_coop_scene_locked(void) {
+    /* Story/ending scripts and Big Pets' IRQ-drawn body own the native
+     * camera and background. Keep activation and presentation on that view. */
+    return C.scene_active || C.follow || C.outro ||
+        (s_on && C.initialized && (R(0x30)>=9 || R(0x23)==0x1D));
+}
 int mm5_coop_menu_active(void) {return s_on && C.menu;}
 int mm5_coop_menu_cursor(int seat) {return C.menu && seat>=0 && seat<2?(seat==C.current?R(0x50):C.menu_cursor[seat]):0;}
 void mm5_coop_view_set(int mode) {
@@ -84,7 +89,7 @@ int mm5_coop_view_rects(int left[2]) {
     for(int seat=0;seat<2;seat++) {
         int who=(C.player[seat].dead || C.player[seat].teleport==TELE_HIDDEN || (C.withdrawn&(1u<<seat)))?C.anchor:seat;
         left[seat]=native;
-        if(!C.scene_active && !C.follow && !C.outro && !R(0xFA) && (R(0x29)&32) && start>=0) {
+        if(!mm5_coop_scene_locked() && !R(0xFA) && (R(0x29)&32) && start>=0) {
             int x=(mm5_coop_read(who,0x348)<<8)|mm5_coop_read(who,0x330),lo=start*256,hi=(start+R(0x2A))*256;
             left[seat]=x-128;if(left[seat]<lo)left[seat]=lo;if(left[seat]>hi)left[seat]=hi;
         }

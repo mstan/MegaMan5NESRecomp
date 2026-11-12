@@ -31,6 +31,8 @@ Shared view shows the initiating player's native inventory. Separate views show 
 
 Independent views activate the union of their complete rectangles and retain terrain by actual screen. Split panels match the individual views pixel for pixel. The rollback network path seals the exact build, ROM, artwork, timing, roster and simulation settings before frame zero, using the shared CPU/backend capability exchange. The current Windows profile has two-process UDP checks from reset through gameplay, including different local views and mixed native/interpreter rollback under delayed packets. Native abilities need no second ROM.
 
+Native story and ending scripts, and Big Pets' background body, retain their authored camera and picture in separate views. These paths have native-background pixel comparisons and interpreter/current-build cold-state checks.
+
 Independent views preserve crumbling blocks on distant screens that share the cartridge's two-screen bitmap parity. Visible distant actors use their personal view for native AI camera checks; authored scene changes keep native camera ownership. Actual native break, leave-view restoration and re-entry behavior has interpreter and cold-state/PCM checks. Broader mutable-terrain visuals remain under qualification.
 
 Defeated authored enemies stay gone while their spawn location remains in either view. The native spawn cursor respects the same lifetime when it later reaches that location; leaving both views permits the original respawn. A distant enemy has native charged-Buster kill, cursor-arrival, leave/re-entry and current-state checks, including matching interpreter execution, PCM and cold-load pictures. Body and camera fixtures bypass traversal; broader pickups and generator coverage remains in progress.

@@ -34,6 +34,9 @@ int mm5_view_json(char *out,int capacity) {
 static void panels_build(void) {
     if(!mm5_coop_independent() || cyc_mod_peek(0x26)>=16 || cyc_mod_peek(0x59))return;
     int left[2];if(!mm5_coop_view_rects(left))return;
+    /* Big Pets draws its body through IRQ background splits. Native player
+     * scripts also replace the stage's tiles/CHR during story and ending
+     * scenes; retain that picture instead of decoding ordinary terrain. */
     s_build.panels=1;s_build.native_scene=(uint8_t)(mm5_coop_scene_locked() || cyc_mod_peek(0xFA) || cyc_mod_peek(0x1B));
     int lo=(cyc_mod_peek(0xF9)-cyc_mod_peek(0x2B))*256,hi=lo+(cyc_mod_peek(0x2A)+1)*256;
     for(int seat=0;seat<2;seat++) {
