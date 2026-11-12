@@ -1,4 +1,4 @@
-# Mega Man 5 â€” NESRecomp
+# Mega Man 5 — NESRecomp
 
 Development port of the original USA cartridge using NESRecomp's cycle backend. Supply your own ROM; the project and releases contain no cartridge data. Native gameplay is the baseline for character, co-op, controls and adaptive widescreen development.
 
@@ -25,7 +25,7 @@ In ordinary horizontal and vertical rooms, holding Select for 90 frames withdraw
 
 The follower departs and returns through native animations when the leading player triggers a room transition. Either player can lead qualified Napalm Man downward or horizontal exits, including independent-view exits several pages beyond the source camera. These cases have native/interpreter and current-build cold-state checks, including exact warm/cold arrival screenshots. Unsafe inventory and weapon presses during these transitions are discarded. Idle vertical rooms retain weapon switching, solo character swapping and airborne shield behavior after scrolling ends.
 
-The optional Wait for both players setting defaults off. The package option, in-game Game menu and `--coop-wait-both on|off` select it. Qualified Napalm Man right/down exits hold the first arrival until the other player reaches that exit; a lone survivor continues. Horizontal waiting keeps the native controller animation, while vertical waiting hides the first body until the native scroll can begin. These cases retain personal health and ammunition, match interpreter execution and resume exactly from current-build waiting states, including PCM and pictures. Other exit directions remain under qualification.
+The optional Wait for both players setting defaults off. The package option, in-game Game menu and `--coop-wait-both on|off` select it. Qualified Napalm Man right/down exits hold the first arrival until the other player reaches that exit; a lone survivor continues. Horizontal waiting keeps the native controller animation, while vertical waiting hides the first body until the native scroll can begin. These cases retain personal health and ammunition, match interpreter execution and resume exactly from current-build waiting states, including PCM and pictures. An inverted guest can also request an upward Gravity Man exit while its partner still uses normal gravity. Once both reach that exit, the native upward scroll and return animations carry them into the next room with matching interpreter and current-build cold-state CPU, PCM and pictures. A lone inverted survivor can take the same exit. Tests position bodies at authored boundaries; backward shutters remain under qualification.
 
 Returning followers retain their native horizontal speed through the beam animation. A returned player can walk immediately under their own controller; the arrival checks include actual movement and separately visible Mega Man and Proto Man.
 
