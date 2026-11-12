@@ -1,6 +1,17 @@
 /* Native MM5 physics/charge/slide remain authoritative for either character. */
 #include "mm5_proto.h"
 #include "mm5_proto_sheet.h"
+#ifdef NESRECOMP_NET
+#include "nes_netplay_identity.h"
+#endif
+
+int mm5_proto_source_hash(uint8_t out[32]) {
+#ifdef NESRECOMP_NET
+    uint8_t both[64];nes_sha256(MM5_PROTO_PNG,sizeof MM5_PROTO_PNG,both);nes_sha256(MM5_PROTO_JUMP_PNG,sizeof MM5_PROTO_JUMP_PNG,both+32);nes_sha256(both,sizeof both,out);return 1;
+#else
+    (void)out;return 0;
+#endif
+}
 #include "mm5_cart.h"
 #include "mm5_coop.h"
 #include "cyc_mod.h"

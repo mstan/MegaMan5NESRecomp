@@ -4,10 +4,77 @@
 #include "cyc_mod.h"
 #include "cyc_render.h"
 #include "cyc_ring.h"
+#include "mod_function_hooks.h"
+#include "mod_savestate.h"
 #include <stdio.h>
+#include <string.h>
 static FILE *s_audit;
 static int s_audit_detail;
 #define R(a) cyc_mod_peek((uint16_t)(a))
+
+/* Retail retains two screen parities. Independent cameras retain each actual
+ * screen instead; the native collision and metatile readers still own their
+ * original calculations, including hazards and dynamic tagged overrides. */
+typedef struct {char magic[4];uint8_t enabled,stage,bits[0x4F][32];} Terrain;
+static Terrain T;
+static uint8_t s_saved_bits[0x4F][32];
+static int s_shadow;
+static uint8_t bitmap(int screen,int index,uint8_t fallback) {
+    return s_shadow && screen>=0 && screen<0x4F?T.bits[screen][index&31]:fallback;
+}
+static uint8_t terrain_read(uint16_t pc,uint16_t address,uint8_t value) {
+    if(!s_shadow || address<0x680 || address>=0x6C0 || R(0x26)>=16)return value;
+    int screen=-1;
+    if(pc==0xC79B)screen=R(0x13);
+    else if(pc==0xD74B)screen=R(0x47);
+    else if(pc==0xD8E2 || (pc==0xA20A && R(0xF4)==5)) {
+        CycModRegs r;cyc_mod_regs(&r);if(r.x<24)screen=R(0x348+r.x);
+    }
+    return bitmap(screen,address,value);
+}
+static int terrain_write(uint16_t address) {
+    if(!s_shadow || R(0x26)>=16)return 0;
+    CycModRegs r;cyc_mod_regs(&r);
+    if(r.x<24 && r.y<64 && (address!=0xA20F || R(0xF4)==5)) {
+        int screen=R(0x348+r.x);if(screen<0x4F)T.bits[screen][r.y&31]=r.a;
+    }
+    return 0;
+}
+static int terrain_reset(uint16_t address) {
+    (void)address;if(s_shadow && !cyc_mod_isolated()){memset(T.bits,0,sizeof T.bits);T.stage=R(0x26)<16?R(0x26):255;}return 0;
+}
+void mm5_world_power(void) {memset(&T,0,sizeof T);T.stage=255;}
+void mm5_world_shadow_set(int enabled) {
+    enabled=enabled!=0;
+    int stage=R(0x26)==16 && R(0x59)?R(0x7A3):R(0x26);
+    if(enabled && !s_shadow && T.stage!=stage) {
+        memset(T.bits,0,sizeof T.bits);
+        T.stage=(uint8_t)(stage<16?stage:255);
+        int page=R(0xF9);
+        for(int i=0;i<2;i++)if(page+i<0x4F)for(int n=0;n<32;n++)T.bits[page+i][n]=R(0x680+((page+i)&1)*32+n);
+    }
+    s_shadow=enabled;cyc_mod_set_ram_read_hook(s_shadow?terrain_read:NULL);
+    nes_mod_set_function_hook_enabled("mm5.world.break",s_shadow);
+    nes_mod_set_function_hook_enabled("mm5.world.restore",s_shadow);
+    nes_mod_set_function_hook_enabled("mm5.world.reset",s_shadow);
+}
+void mm5_world_private_begin(void) {if(s_shadow)memcpy(s_saved_bits,T.bits,sizeof T.bits);}
+void mm5_world_private_end(int commit) {if(s_shadow && !commit)memcpy(T.bits,s_saved_bits,sizeof T.bits);}
+static int terrain_get(uint8_t *out,int cap) {
+    if(cap<sizeof T)return -1;memcpy(T.magic,"MT02",4);T.enabled=(uint8_t)s_shadow;memcpy(out,&T,sizeof T);return sizeof T;
+}
+static int terrain_valid(const uint8_t *in,int len) {
+    return len==0?!s_shadow:in && len==sizeof T && !memcmp(in,"MT02",4) && in[4]==s_shadow && (in[5]<16 || in[5]==255);
+}
+static int terrain_set(const uint8_t *in,int len) {
+    if(!terrain_valid(in,len))return 0;if(len)memcpy(&T,in,sizeof T);else mm5_world_power();return 1;
+}
+void mm5_world_register(void) {
+    nes_mod_register_function_entry_plugin("mm5.world.break",0xD8E7,terrain_write);
+    nes_mod_register_function_entry_plugin("mm5.world.restore",0xA20F,terrain_write);
+    nes_mod_register_function_entry_plugin("mm5.world.reset",0xC3B8,terrain_reset);
+    nes_mod_register_savestate_hook("mm5.terrain",terrain_get,terrain_set);nes_mod_register_savestate_validator("mm5.terrain",terrain_valid);
+}
 
 int mm5_world_tile(int screen, int x, int y, Mm5WorldTile *out) {
     int stage = R(0x26), art = R(0x27);
@@ -29,7 +96,7 @@ int mm5_world_tile(int screen, int x, int y, Mm5WorldTile *out) {
         if (!replaced && !R(0x1E)) {
             int bit = ((block_pos & 1) << 2) | quadrant;
             int index = (block_pos >> 1) | ((screen & 1) ? 32 : 0);
-            if (R(0x680 + index) & (0x80 >> bit)) meta = 0;
+            if (bitmap(screen,index,R(0x680 + index)) & (0x80 >> bit)) meta = 0;
         }
     }
     /* D50B emits buffer columns: AD/AE are top-left/top-right;

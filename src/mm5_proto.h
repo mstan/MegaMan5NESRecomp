@@ -26,3 +26,5 @@ void mm5_view_wide(int enabled);
 void mm5_view_coop(int enabled);
 void mm5_view_draw_character(uint32_t *out, int width, int origin, const Mm5ProtoBody *body);
 void mm5_view_no_flicker(int enabled);
+int mm5_view_json(char *out,int capacity);
+void mm5_view_menu_character(uint32_t *out,int width,int origin,int cursor,int character,const uint8_t palette[8]);

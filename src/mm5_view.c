@@ -4,15 +4,19 @@
 #include "mm5_wide.h"
 #include "mm5_coop.h"
 #include "mm5_hud.h"
+#include "mm5_menu.h"
 #include "cyc_mod.h"
 #include "cyc_render.h"
 #include "mod_function_hooks.h"
 #include "mod_savestate.h"
 #include <string.h>
+#include <stdio.h>
 
 typedef struct {
     char magic[4];
-    uint8_t valid, owners[64];
+    uint8_t valid, owners[64],panels,native_scene;
+    int16_t left[2];
+    uint8_t tiles[2][30][33],palettes[2][30][33],present[2][30][33];
     Mm5ProtoBody body;
 } ViewFrame;
 static ViewFrame s_build, s_frame;
@@ -20,12 +24,33 @@ static int s_enabled, s_wide, s_coop, s_no_flicker;
 static uint32_t s_bg[256 * 240];
 static uint8_t s_opaque[864 * 240], s_allowed[64][240];
 static uint8_t s_claimed[864 * 240];
+static uint32_t s_panel[2][256*240];
+int mm5_view_json(char *out,int capacity) {
+    return snprintf(out,capacity,"\"view\":{\"mode\":%d,\"panels\":%u,\"scene\":%u,\"left\":[%d,%d]}",
+        mm5_coop_view_mode(),s_frame.panels,s_frame.native_scene,s_frame.left[0],s_frame.left[1]);
+}
+
+static void panels_build(void) {
+    if(!mm5_coop_independent() || cyc_mod_peek(0x26)>=16 || cyc_mod_peek(0x59))return;
+    int left[2];if(!mm5_coop_view_rects(left))return;
+    s_build.panels=1;s_build.native_scene=(uint8_t)(mm5_coop_scene_locked() || cyc_mod_peek(0xFA) || cyc_mod_peek(0x1B));
+    int lo=(cyc_mod_peek(0xF9)-cyc_mod_peek(0x2B))*256,hi=lo+(cyc_mod_peek(0x2A)+1)*256;
+    for(int seat=0;seat<2;seat++) {
+        s_build.left[seat]=(int16_t)left[seat];
+        for(int y=0;y<30;y++)for(int x=0;x<33;x++) {
+            int wx=(left[seat]&~7)+x*8;Mm5WorldTile t;
+            if(wx<lo || wx>=hi || !mm5_world_tile(wx/256,wx&255,y*8,&t))continue;
+            s_build.tiles[seat][y][x]=t.tile;s_build.palettes[seat][y][x]=t.palette;s_build.present[seat][y][x]=1;
+        }
+    }
+}
 
 static int begin(uint16_t address) {
     (void)address;
     memset(&s_build, 0, sizeof s_build); memset(s_build.owners, 255, sizeof s_build.owners);
     mm5_wide_begin();
     mm5_coop_build();
+    panels_build();
     return 0;
 }
 static int part(uint16_t address) {
@@ -85,32 +110,36 @@ static uint32_t menu_color(uint32_t c) {
     }
     return out;
 }
-static int inventory(uint32_t *out, int W, int H, const uint32_t *native) {
+void mm5_view_menu_character(uint32_t *out,int W,int origin,int cursor,int character,const uint8_t palette[8]) {
     const CycProtoAtlas *atlas = mm5_proto_atlas();
-    if (!atlas || !mm5_proto_selected() || W < 256 || H != 240 || !native) return 0;
-    int origin = (W - 256) / 2;
-    for (int i = 0; i < W * H; ++i) out[i] = 0xFF000000u;
-    for (int y = 0; y < H; ++y) memcpy(out + y * W + origin, native + y * 256, 256 * sizeof *out);
+    if(!atlas || !character)return;
     /* The retail menu's fixed 16x16 life icon, above its original life count. */
     for (int y = 0; y < 16; ++y) for (int x = 0; x < 16; ++x) {
         uint32_t c = atlas->portrait[y * 16 + x];
         out[(192 + y) * W + origin + 208 + x] = c ? menu_color(c) : 0xFF000000u;
     }
-    int cursor = cyc_mod_peek(0x50);
     /* Rush/Beat keep their own native previews. The other rows preview the
      * selected character on the same bottom-panel grid and foot baseline. */
     if (cursor != 6 && cursor != 12 && cursor != 13 && cursor != 14) {
         const CycProtoPose *p = &atlas->poses[CYC_PROTO_IDLE0];
         for (int y = 184; y < 217; ++y) for (int x = 140; x < 178; ++x) out[y * W + origin + x] = 0xFF000000u;
         Mm5ProtoBody body = {0}; body.weapon = cursor != 0;
-        for (int i = 0; i < 8; ++i) body.palette[i] = cyc_mod_peek((uint16_t)(0x610 + i));
+        memcpy(body.palette,palette,sizeof body.palette);
         for (int y = 0; y < p->height; ++y) for (int x = 0; x < p->width; ++x) {
             int index = p->pixels[y * 32 + x]; if (!index) continue;
             int px = 160 + x - p->origin_x, py = 205 + p->top_y + y;
             out[py * W + origin + px] = menu_color(color(index, &body));
         }
     }
-    cyc_render_set_native_origin(origin); return 1;
+}
+static int inventory(uint32_t *out, int W, int H, const uint32_t *native) {
+    if(!mm5_proto_atlas() || !mm5_proto_selected() || W<256 || H!=240 || !native)return 0;
+    int origin=(W-256)/2;
+    for(int i=0;i<W*H;i++)out[i]=0xFF000000u;
+    for(int y=0;y<H;y++)memcpy(out+y*W+origin,native+y*256,256*sizeof *out);
+    uint8_t palette[8];for(int i=0;i<8;i++)palette[i]=cyc_mod_peek((uint16_t)(0x610+i));
+    mm5_view_menu_character(out,W,origin,cyc_mod_peek(0x50),1,palette);
+    cyc_render_set_native_origin(origin);return 1;
 }
 static void sprite(uint32_t *out, int W, int origin, int slot, const uint8_t *oam) {
     const uint8_t *o = oam + slot * 4;
@@ -134,9 +163,49 @@ static void sprite(uint32_t *out, int W, int origin, int slot, const uint8_t *oa
         }
     }
 }
+static void panel_scene(uint32_t *out,int seat) {
+    int left=s_frame.left[seat],phase=left&7;
+    memset(s_claimed,0,256*240);memset(s_opaque,0,256*240);
+    const uint8_t *native_opaque=cyc_frame_bg_opaque();
+    for(int y=0;y<240;y++)for(int x=0;x<256;x++) {
+        int at=y*256+x,v=0,cell=(phase+x)/8,bit=7-((phase+x)&7);
+        if(s_frame.native_scene) {
+            out[at]=s_bg[at];s_opaque[at]=native_opaque[at];continue;
+        }
+        if(s_frame.present[seat][y/8][cell] && (cyc_render_line_mask(y)&8)) {
+            int tile=s_frame.tiles[seat][y/8][cell],a=cyc_render_line_bg_table(y)+tile*16+(y&7);
+            v=((cyc_render_chr((uint16_t)a)>>bit)&1)|(((cyc_render_chr((uint16_t)(a+8))>>bit)&1)<<1);
+        }
+        out[at]=cyc_render_color(v?s_frame.palettes[seat][y/8][cell]*4+v:0);s_opaque[at]=(uint8_t)(v!=0);
+    }
+    int native_camera=mm5_wide_camera(),origin=native_camera-left;
+    for(int rank=0;rank<24;rank++) {
+        mm5_wide_draw(out,256,origin,s_opaque,s_claimed,rank);
+        if(!rank)mm5_coop_draw(out,256,origin,s_opaque,s_claimed);
+    }
+    mm5_hud_draw(out,256,240,seat);
+}
+static int panels(uint32_t *out,int width,int height) {
+    int mode=mm5_coop_view_mode();
+    if(!mode || !s_frame.panels || width<256 || height!=240)return 0;
+    if(mode==1) {
+        panel_scene(s_panel[0],0);panel_scene(s_panel[1],1);
+        int half=width/2;
+        for(int y=0;y<240;y++)for(int x=0;x<width;x++) {
+            int seat=x>=half,local=x-(seat?half:0),span=seat?width-half:half;
+            out[y*width+x]=s_panel[seat][y*256+local*256/span];
+        }
+    } else {
+        int seat=mode==3;panel_scene(s_panel[seat],seat);
+        for(int y=0;y<240;y++)for(int x=0;x<width;x++)out[y*width+x]=s_panel[seat][y*256+x*256/width];
+    }
+    cyc_render_set_native_origin(0);return 1;
+}
 static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *native, void *ctx) {
     (void)ctx; (void)native_x0;
     if (cyc_render_background(s_bg)) mm5_world_audit(s_bg);
+    if(mm5_menu_draw(out,W,H))return 1;
+    if(!mm5_coop_menu_active() && cyc_mod_peek(0x26)<16 && !cyc_mod_peek(0x59) && panels(out,W,H))return 1;
     /* The inventory swaps to a pseudo-stage without rebuilding world OAM.
      * Never paint the last latched gameplay actor over its native panels. */
     if (s_enabled && cyc_mod_peek(0x26) == 16 && cyc_mod_peek(0x59)) return inventory(out, W, H, native);
@@ -204,7 +273,7 @@ void mm5_view_coop(int enabled) { s_coop = enabled != 0; refresh(); }
 void mm5_view_no_flicker(int enabled) {s_no_flicker=enabled!=0;refresh();}
 static int get(uint8_t *out, int cap) {
     if (cap < sizeof s_frame + sizeof s_build) return -1;
-    memcpy(s_build.magic, "MV01", 4); memcpy(s_frame.magic, "MV01", 4);
+    memcpy(s_build.magic, "MV02", 4); memcpy(s_frame.magic, "MV02", 4);
     memcpy(out, &s_build, sizeof s_build); memcpy(out + sizeof s_build, &s_frame, sizeof s_frame);
     return sizeof s_build + sizeof s_frame;
 }
@@ -214,9 +283,11 @@ static int valid(const uint8_t *in, int len) {
     ViewFrame frames[2]; memcpy(frames, in, sizeof frames);
     for (int i = 0; i < 2; ++i) {
         const Mm5ProtoBody *b = &frames[i].body;
-        if (memcmp(frames[i].magic, "MV01", 4) || frames[i].valid > 1 || b->pose >= CYC_PROTO_POSE_COUNT ||
+        if (memcmp(frames[i].magic, "MV02", 4) || frames[i].valid > 1 || frames[i].panels>1 || frames[i].native_scene>1 || b->pose >= CYC_PROTO_POSE_COUNT ||
             b->active > 1 || b->right > 1 || b->flipped > 1 || b->behind > 1 || b->weapon > 12) return 0;
         for (int j = 0; j < 64; ++j) if (frames[i].owners[j] != 255 && frames[i].owners[j] >= 24) return 0;
+        for(int seat=0;seat<2;seat++)for(int y=0;y<30;y++)for(int x=0;x<33;x++)
+            if(frames[i].palettes[seat][y][x]>3 || frames[i].present[seat][y][x]>1)return 0;
     }
     return 1;
 }

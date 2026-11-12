@@ -16,3 +16,11 @@ void mm5_coop_draw(uint32_t *out, int width, int origin, const uint8_t *opaque, 
 int mm5_coop_json(char *out, int capacity);
 int mm5_coop_test_poke(const char *value);
 int mm5_coop_character_at(int seat);
+int mm5_coop_view_mode(void);
+int mm5_coop_independent(void);
+void mm5_coop_view_set(int mode);
+int mm5_coop_view_rects(int left[2]);
+int mm5_coop_scene_locked(void);
+int mm5_coop_menu_active(void);
+int mm5_coop_menu_cursor(int seat);
+int mm5_coop_shared_left(int proposed,int width,int lo,int hi);

@@ -39,6 +39,7 @@ static int safe(void) {
 }
 static int owned(int id) { return !id || (READ(0xB0 + id) & 128); }
 
+int mm5_weapons_enabled(void) {return s_on;}
 void mm5_weapons_set(int enabled) {
     s_on = enabled != 0;
     for(int i=0;i<2;i++)s_players[i].previous=s_players[i].pending=0;
@@ -73,6 +74,13 @@ int mm5_weapons_dispatch(uint16_t address) {
     for (cursor = 0; cursor < 16; ++cursor)
         if (cursor != 7 && cursor != 15 && source(1, 0x85E1 + cursor) == next) break;
     if (cursor == 16) return 0;
+    mm5_weapons_equip_cursor(cursor);return 0;
+}
+int mm5_weapons_equip_cursor(int cursor) {
+    if(cursor<0 || cursor>15 || cursor==7 || cursor==15 || !cartridge())return 0;
+    int next=source(1,0x85E1+cursor);
+    if(next>12 || !owned(next))return 0;
+    if(next==READ(0x32)){WRITE(0x50,cursor);return 1;}
 
     /* The native player owns slots 1..7; world actors start at slot 8.
      * Retiring a helper clears its carrier reference without touching enemies. */
@@ -97,7 +105,7 @@ int mm5_weapons_dispatch(uint16_t address) {
     int q = READ(0xDA) & 7;
     if (READ(0xDC + q) == 0x88) { WRITE(0xDC + q, 0x27); WRITE(0xDA, (q + 1) & 7); }
     W.changes++;
-    return 0;
+    return 1;
 }
 
 static int get(uint8_t *out, int cap) {

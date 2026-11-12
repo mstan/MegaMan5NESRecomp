@@ -4,6 +4,7 @@
 #include "mm5_world.h"
 #include "mm5_wide.h"
 #include "mm5_coop.h"
+#include "mm5_net.h"
 #include "cyc_host_extras.h"
 #include "cyc_core.h"
 #include "cyc_input.h"
@@ -20,20 +21,32 @@ static unsigned s_extra_lines;
 static void timing(unsigned lines) {
     s_extra_lines=lines;
     if(!lines || cyc_extra_scanlines_supported())cyc_set_extra_scanlines(lines);
-    nes_mod_set_local_only("MM5 CPU budget (unqualified netplay)",lines!=0);
+    if(!mm5_net_locked())nes_mod_set_local_only("MM5 CPU budget (unqualified netplay)",lines!=0);
 }
-static void activate_slowdown(void) {timing(262);}
-static void activate_noflicker(void) {mm5_no_flicker_set(1);}
+static void activate_slowdown(void) {if(!mm5_net_locked())timing(262);}
+static void activate_noflicker(void) {if(!mm5_net_locked())mm5_no_flicker_set(1);}
 static void loaded(void *ctx) {(void)ctx;timing(s_extra_lines);}
+Mm5Settings mm5_host_settings(void) {
+    Mm5Settings c={mm5_coop_enabled(),mm5_coop_independent(),s_coop_roster,s_proto_on,s_proto_mode,mm5_weapons_enabled(),mm5_wide_enabled(),mm5_no_flicker_enabled(),(int)s_extra_lines};return c;
+}
+int mm5_host_apply_settings(Mm5Settings c,int local_seat) {
+    s_proto_on=c.proto;s_proto_mode=c.mode;s_proto_start=1;s_coop_roster=c.roster;
+    if(!mm5_proto_set(c.proto,c.mode,1))return 0;
+    mm5_weapons_set(c.weapons);mm5_wide_set(c.wide,"fit");mm5_no_flicker_set(c.flicker);timing((unsigned)c.lines);
+    int view=mm5_coop_view_mode();mm5_coop_set(c.coop,c.roster);
+    mm5_coop_view_set(c.independent?(view?view:(local_seat==1?3:2)):0);return 1;
+}
 
-static void reset(void) { mm5_coop_set(0,s_coop_roster);mm5_weapons_set(0);s_proto_on=0;mm5_proto_set(0,s_proto_mode,s_proto_start);mm5_wide_set(0,"fit");mm5_no_flicker_set(0);timing(0); }
+static void reset(void) {if(mm5_net_locked())return;mm5_coop_set(0,s_coop_roster);mm5_weapons_set(0);s_proto_on=0;mm5_proto_set(0,s_proto_mode,s_proto_start);mm5_wide_set(0,"fit");mm5_no_flicker_set(0);timing(0); }
 static void activate_wide(void) {
+    if(mm5_net_locked())return;
     char aspect[24]="fit";
     nes_mod_option_value("mega-man-5-usa.enhancement.widescreen","widescreen","aspect",aspect,sizeof aspect);
     mm5_wide_set(1,aspect);
 }
-static void activate_weapons(void) { mm5_weapons_set(1); }
+static void activate_weapons(void) {if(!mm5_net_locked())mm5_weapons_set(1);}
 static void activate_proto(void) {
+    if(mm5_net_locked())return;
     const char *package = "mega-man-5-usa.character.protoman";
     char mode[16] = "protoman", start[16] = "protoman";
     nes_mod_option_value(package, "protoman", "mode", mode, sizeof mode);
@@ -41,8 +54,17 @@ static void activate_proto(void) {
     s_proto_mode = !strcmp(mode, "protoman"); s_proto_start = !strcmp(start, "protoman");
     s_proto_on = mm5_proto_set(1, s_proto_mode, s_proto_start);
 }
+static void activate_coop(void) {
+    if(mm5_net_locked())return;
+    const char *package="mega-man-5-usa.coop";char roster[16]="megaman",view[16]="shared";
+    nes_mod_option_value(package,"coop","player-one",roster,sizeof roster);
+    nes_mod_option_value(package,"coop","coop-view",view,sizeof view);
+    activate_proto();s_coop_roster=!strcmp(roster,"protoman");mm5_coop_set(1,s_coop_roster);
+    mm5_coop_view_set(!strcmp(view,"split")?1:!strcmp(view,"p1")?2:!strcmp(view,"p2")?3:0);
+}
 NES_MOD_CONSTRUCTOR(register_mm5) {
     mm5_weapons_register();
+    mm5_world_register();
     mm5_proto_register();
     mm5_wide_register();
     mm5_coop_register();
@@ -53,22 +75,26 @@ NES_MOD_CONSTRUCTOR(register_mm5) {
     nes_mod_register_activation_plugin("mega-man-5-usa.widescreen", activate_wide);
     nes_mod_register_activation_plugin("mega-man-5-usa.slowdown", activate_slowdown);
     nes_mod_register_activation_plugin("mega-man-5-usa.noflicker", activate_noflicker);
+    nes_mod_register_activation_plugin("mega-man-5-usa.coop",activate_coop);
 }
-static void power(void *ctx) { (void)ctx; mm5_cart_power();mm5_coop_power();mm5_weapons_power();mm5_proto_power();mm5_wide_power();timing(s_extra_lines); }
+static void power(void *ctx) { (void)ctx; mm5_cart_power();mm5_world_power();mm5_coop_power();mm5_weapons_power();mm5_proto_power();mm5_wide_power();timing(s_extra_lines); }
 static void input(void *ctx, uint8_t buttons[2]) { (void)ctx;mm5_coop_input(buttons);mm5_weapons_input(); }
 static void end(void *ctx) {
     (void)ctx;mm5_coop_end();mm5_weapons_end();mm5_proto_end();
     if (s_log) {
-        char fields[2048]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
+        char fields[4096]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
         mm5_proto_json(fields + n, sizeof fields - n);
         n = (int)strlen(fields); fields[n++] = ','; mm5_wide_json(fields+n,sizeof fields-n);
         n = (int)strlen(fields); fields[n++] = ','; mm5_coop_json(fields+n,sizeof fields-n);
+        n = (int)strlen(fields); fields[n++] = ','; mm5_view_json(fields+n,sizeof fields-n);
         n = (int)strlen(fields);snprintf(fields+n,sizeof fields-n,",\"timing\":{\"extra_lines\":%u}",cyc_extra_scanlines());
         fprintf(s_log, "{\"frame\":%u,%s}\n", cyc_ring_frame, fields);
     }
 }
 static bool option(void *ctx, const char *name, const char *value) {
     (void)ctx;
+    mm5_net_note_option(name);
+    if(mm5_net_locked() && strcmp(name,"--coop-view"))return false;
     if(!strcmp(name,"--coop")) {
         if(strcmp(value,"on") && strcmp(value,"off"))return false;
         if(!strcmp(value,"on")){s_proto_on=1;if(!mm5_proto_set(1,s_proto_mode,s_proto_start))return false;}
@@ -79,6 +105,10 @@ static bool option(void *ctx, const char *name, const char *value) {
         s_coop_roster=!strcmp(value,"protoman");mm5_coop_set(mm5_coop_enabled(),s_coop_roster);return true;
     }
     if(!strcmp(name,"--coop-test-poke"))return mm5_coop_test_poke(value);
+    if(!strcmp(name,"--coop-view")) {
+        int mode=!strcmp(value,"shared")?0:!strcmp(value,"split")?1:!strcmp(value,"p1")?2:!strcmp(value,"p2")?3:-1;
+        if(mode<0)return false;mm5_coop_view_set(mode);return true;
+    }
     if(!strcmp(name,"--slowdown-reduction")) {
         if(strcmp(value,"on") && strcmp(value,"off"))return false;
         timing(!strcmp(value,"on")?262:0);return true;
@@ -107,10 +137,11 @@ static bool option(void *ctx, const char *name, const char *value) {
     mm5_weapons_set(!strcmp(value, "on")); return true;
 }
 static void state(int id, const char *line) {
-    (void)line; char fields[2048]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
+    (void)line; char fields[4096]; int n = mm5_weapons_json(fields, sizeof fields); fields[n++] = ',';
     mm5_proto_json(fields + n, sizeof fields - n);
     n = (int)strlen(fields); fields[n++] = ','; mm5_wide_json(fields+n,sizeof fields-n);
     n = (int)strlen(fields); fields[n++] = ','; mm5_coop_json(fields+n,sizeof fields-n);
+    n = (int)strlen(fields); fields[n++] = ','; mm5_view_json(fields+n,sizeof fields-n);
     n = (int)strlen(fields);snprintf(fields+n,sizeof fields-n,",\"timing\":{\"extra_lines\":%u}",cyc_extra_scanlines());
     cyc_tcp_ok(id, fields);
 }
@@ -134,10 +165,11 @@ const CycHostExtras *cyc_host_extras(void) {
         {"--coop-test-poke", true, "FRAME:SEAT:ADDR:BYTE: scheduled personal RAM fixture (seat0 or1)"},
         {"--slowdown-reduction", true, "on|off: extra game CPU time; off restores stock timing"},
         {"--no-flicker", true, "on|off: retain complete actors beyond scanline and OAM limits"},
+        {"--coop-view", true, "shared|split|p1|p2: co-op display and independent native cameras"},
     };
     static const CycHostExtras extras = {
         .power_on = power, .state_loaded = loaded, .input = input, .frame_end = end, .tcp_setup = tcp,
-        .option = option, .options = options, .option_count = 12, .input_profile = &profile,
+        .option = option, .options = options, .option_count = 13, .input_profile = &profile,
     };
     return &extras;
 }

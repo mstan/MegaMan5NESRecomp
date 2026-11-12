@@ -42,10 +42,12 @@ nesrecomp_add_cycle_game(MegaMan5Recomp
     MODS
     HOST_EXTRAS
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_host.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_net.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_cart.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_world.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_coop.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_hud.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_menu.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_wide.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_weapons.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/mm5_proto.c"
@@ -53,6 +55,18 @@ nesrecomp_add_cycle_game(MegaMan5Recomp
         "${NESRECOMP_ROOT}/runner/cyc/cyc_protoman_atlas.c")
 target_include_directories(MegaMan5Recomp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_BINARY_DIR}" "${NESRECOMP_ROOT}/runner/src")
+option(MM5_ENABLE_NETPLAY "Build the shared rollback netplay and lobby" ON)
+option(MM5_NETPLAY_QUALIFIED "Enable the qualified MM5 simulation profile" ON)
+if(MM5_ENABLE_NETPLAY OR NESRECOMP_ENABLE_NET)
+    nesrecomp_enable_recomp_net(MegaMan5Recomp)
+    if(MM5_NETPLAY_QUALIFIED)
+        target_compile_definitions(MegaMan5Recomp PRIVATE MM5_NETPLAY_QUALIFIED=1)
+    endif()
+endif()
+option(MM5_NETPLAY_TEST_BOOT "Allow exact current-build preadmission QA fixtures" OFF)
+if(MM5_NETPLAY_TEST_BOOT)
+    set_property(SOURCE "${NESRECOMP_ROOT}/runner/cyc/cyc_net.c" APPEND PROPERTY COMPILE_DEFINITIONS NESRECOMP_NET_TEST_BOOT=1)
+endif()
 add_custom_command(TARGET MegaMan5Recomp POST_BUILD
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/mods/preloaded/packages"

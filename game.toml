@@ -3,6 +3,36 @@ name = "Mega Man 5"
 output_prefix = "mega-man-5"
 console = "nes"
 
+[[mod_function_hook]]
+id = "mm5.menu.flush"
+addr = 0xC298
+length = 8
+crc32 = 0x4FE61602
+
+[[mod_function_hook]]
+id = "mm5.coop.menu-idle"
+addr = 0x80A3
+length = 8
+crc32 = 0x4B8B14D5
+
+[[mod_function_hook]]
+id = "mm5.world.break"
+addr = 0xD8E7
+length = 8
+crc32 = 0x8E3842F6
+
+[[mod_function_hook]]
+id = "mm5.world.restore"
+addr = 0xA20F
+length = 8
+crc32 = 0x55212C21
+
+[[mod_function_hook]]
+id = "mm5.world.reset"
+addr = 0xC3B8
+length = 8
+crc32 = 0xF4F1C1BF
+
 # Fixed-bank gameplay call immediately before the native player controller.
 [[mod_function_hook]]
 id = "mm5.player"
