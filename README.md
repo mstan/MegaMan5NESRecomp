@@ -1,4 +1,4 @@
-# Mega Man 5 — NESRecomp
+# Mega Man 5 â€” NESRecomp
 
 Development port of the original USA cartridge using NESRecomp's cycle backend. Supply your own ROM; the project and releases contain no cartridge data. Native gameplay is the baseline for character, co-op, controls and adaptive widescreen development.
 
@@ -25,13 +25,17 @@ In ordinary horizontal and vertical rooms, holding Select for 90 frames withdraw
 
 The follower departs and returns through native animations when the leading player triggers a room transition. Either player can lead qualified Napalm Man downward or horizontal exits, including independent-view exits several pages beyond the source camera. These cases have native/interpreter and current-build cold-state checks, including exact warm/cold arrival screenshots. Unsafe inventory and weapon presses during these transitions are discarded. Idle vertical rooms retain weapon switching, solo character swapping and airborne shield behavior after scrolling ends.
 
+The optional Wait for both players setting defaults off. The package option, in-game Game menu and `--coop-wait-both on|off` select it. Qualified Napalm Man right/down exits hold the first arrival until the other player reaches that exit; a lone survivor continues. Horizontal waiting keeps the native controller animation, while vertical waiting hides the first body until the native scroll can begin. These cases retain personal health and ammunition, match interpreter execution and resume exactly from current-build waiting states, including PCM and pictures. Other exit directions remain under qualification.
+
+Returning followers retain their native horizontal speed through the beam animation. A returned player can walk immediately under their own controller; the arrival checks include actual movement and separately visible Mega Man and Proto Man.
+
 Gravity panels apply their original contact routine separately to each player, so one player can stand on the ceiling while the other uses normal gravity. Gravity Man's arena flips and the native boss-death reset reach both players. Inverted players can withdraw and rejoin beside a ceiling partner while retaining personal health and equipment. Native door, boss and rejoin continuations match between native/interpreter execution and current-build cold loading, including PCM and resumed pictures.
 
 Shared-view co-op displays both players' health and selected-weapon energy using the cartridge's native meter routine and tiles. Proto Man's health meter has the blueprint's red tint. The meters have personal resource, inventory-resume and exact cold-load screenshot checks; isolated HUD construction preserves the accepted combat simulation.
 
 Shared view shows the initiating player's native inventory. Separate views show both personal native pages, built from the cartridge's original layout, packet and cursor routines. Both players can choose their own weapons while paused; the initiating player resumes the world. Native E/M-tank actions retain shared stock and heal/refill their user on the original clock. Simultaneous requests, empty items, nonpauser use, pause ownership, cold loading and PCM continuation have native/interpreter checks. The pauser's 256x240 panel matches the native inventory pixel for pixel.
 
-Independent views activate the union of their complete rectangles and retain terrain by actual screen. Split panels match the individual views pixel for pixel. The rollback network path seals the exact build, ROM, artwork, timing, roster and simulation settings before frame zero, using the shared CPU/backend capability exchange. The current Windows profile has two-process UDP checks from reset through gameplay, including different local views and mixed native/interpreter rollback under delayed packets. Native abilities need no second ROM.
+Independent views activate the union of their complete rectangles and retain terrain by actual screen. Split panels match the individual views pixel for pixel. The rollback network path seals the exact build, ROM, artwork, timing, roster and simulation settings before frame zero, using the shared CPU/backend capability exchange. The earlier Windows profile has two-process UDP checks from reset through gameplay, including different local views and mixed native/interpreter rollback under delayed packets. The updated session settings also seal the wait policy; online qualification of this profile remains in progress. Native abilities need no second ROM.
 
 Native story and ending scripts, and Big Pets' background body, retain their authored camera and picture in separate views. These paths have native-background pixel comparisons and interpreter/current-build cold-state checks.
 

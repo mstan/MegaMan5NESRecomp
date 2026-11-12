@@ -13,7 +13,7 @@ static unsigned s_cli;
 int mm5_net_locked(void) {return s_sealed && !s_applying;}
 int mm5_net_simulation_width(int local) {return s_sealed?s_width:local;}
 void mm5_net_note_option(const char *name) {
-    if(!strcmp(name,"--coop") || !strcmp(name,"--coop-view") || !strcmp(name,"--coop-roster"))s_cli|=1;
+    if(!strcmp(name,"--coop") || !strcmp(name,"--coop-view") || !strcmp(name,"--coop-roster") || !strcmp(name,"--coop-wait-both"))s_cli|=1;
     if(!strcmp(name,"--protoman") || !strcmp(name,"--proto-mode"))s_cli|=2;
     if(!strcmp(name,"--weapon-cycle"))s_cli|=4;
     if(!strcmp(name,"--widescreen"))s_cli|=8;
@@ -40,7 +40,7 @@ static int option_is(const char *id,const char *feature,const char *key,const ch
 static Mm5Settings offer(void) {
     Mm5Settings c=mm5_host_settings();if(!cyc_session_mods_enabled())return c;
     const char *proto="mega-man-5-usa.character.protoman",*coop="mega-man-5-usa.coop";
-    if(!(s_cli&1)){c.coop=selected(coop,"coop");c.independent=!option_is(coop,"coop","coop-view","shared","shared");c.roster=option_is(coop,"coop","player-one","protoman","megaman");}
+    if(!(s_cli&1)){c.coop=selected(coop,"coop");c.independent=!option_is(coop,"coop","coop-view","shared","shared");c.roster=option_is(coop,"coop","player-one","protoman","megaman");c.wait_both=option_is(coop,"coop","wait-for-both","on","off");}
     if(!(s_cli&2)){c.proto=selected(proto,"protoman") || c.coop;c.mode=option_is(proto,"protoman","mode","protoman","protoman");}
     if(!(s_cli&4))c.weapons=selected("mega-man-5-usa.enhancement.weapons","weapons");
     if(!(s_cli&8))c.wide=selected("mega-man-5-usa.enhancement.widescreen","widescreen");
@@ -69,16 +69,16 @@ static int catalog_supported(void) {
 #endif
 }
 static int describe(Mm5Settings c,char *out,int cap) {
-    return snprintf(out,cap,"1:%d:%d:%d:%d:%d:%d:%d:%d:%d",c.coop,c.independent,c.roster,c.proto,c.mode,c.weapons,c.wide,c.flicker,c.lines);
+    return snprintf(out,cap,"2:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d",c.coop,c.independent,c.roster,c.proto,c.mode,c.weapons,c.wide,c.flicker,c.lines,c.wait_both);
 }
 static int settings_get(char *out,int cap) {return describe(mm5_host_settings(),out,cap);}
 static int settings_offer(char *out,int cap) {s_offer=offer();return describe(s_offer,out,cap);}
 static int settings_apply(const char *value) {
     Mm5Settings c;int version,n=0;
     if((s_cli&64) || !catalog_supported())return 0;
-    if(sscanf(value,"%d:%d:%d:%d:%d:%d:%d:%d:%d:%d%n",&version,&c.coop,&c.independent,&c.roster,&c.proto,&c.mode,&c.weapons,&c.wide,&c.flicker,&c.lines,&n)!=10 || value[n] || version!=1)return 0;
+    if(sscanf(value,"%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d%n",&version,&c.coop,&c.independent,&c.roster,&c.proto,&c.mode,&c.weapons,&c.wide,&c.flicker,&c.lines,&c.wait_both,&n)!=11 || value[n] || version!=2)return 0;
     if(c.coop!=1 || c.proto!=1 || c.independent<0 || c.independent>1 || c.roster<0 || c.roster>1 || c.mode<0 || c.mode>1 ||
-        c.weapons<0 || c.weapons>1 || c.wide<0 || c.wide>1 || c.flicker<0 || c.flicker>1 || (c.lines!=0 && c.lines!=262) || (c.independent && s_width!=256))return 0;
+        c.weapons<0 || c.weapons>1 || c.wide<0 || c.wide>1 || c.flicker<0 || c.flicker>1 || c.wait_both<0 || c.wait_both>1 || (c.lines!=0 && c.lines!=262) || (c.independent && s_width!=256))return 0;
     if(!s_saved){s_offline=mm5_host_settings();s_offline_view=mm5_coop_view_mode();s_offline_video=cyc_video_mode();s_offline_width=cyc_video_width();s_saved=1;}
     s_applying=1;int ok=mm5_host_apply_settings(c,nes_netplay_local_slot());s_applying=0;if(!ok)return 0;
     s_sealed=1;nes_netplay_require_capabilities(1);nes_netplay_require_player_count(2);

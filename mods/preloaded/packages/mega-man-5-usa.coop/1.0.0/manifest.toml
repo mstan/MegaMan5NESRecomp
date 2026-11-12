@@ -46,6 +46,20 @@ label = "Independent: player two"
 
 [[option]]
 feature = "coop"
+id = "wait-for-both"
+label = "Wait for both players"
+description = "Wait at room exits until both players arrive. A lone survivor can continue."
+type = "choice"
+default = "off"
+[[option.choice]]
+value = "off"
+label = "Either player can lead"
+[[option.choice]]
+value = "on"
+label = "Wait for both players"
+
+[[option]]
+feature = "coop"
 id = "player-one"
 label = "Player one character"
 type = "choice"

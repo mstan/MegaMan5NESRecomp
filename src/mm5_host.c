@@ -31,17 +31,17 @@ static void activate_slowdown(void) {if(!mm5_net_locked())timing(262);}
 static void activate_noflicker(void) {if(!mm5_net_locked())mm5_no_flicker_set(1);}
 static void loaded(void *ctx) {(void)ctx;timing(s_extra_lines);}
 Mm5Settings mm5_host_settings(void) {
-    Mm5Settings c={mm5_coop_enabled(),mm5_coop_independent(),s_coop_roster,s_proto_on,s_proto_mode,mm5_weapons_enabled(),mm5_wide_enabled(),mm5_no_flicker_enabled(),(int)s_extra_lines};return c;
+    Mm5Settings c={mm5_coop_enabled(),mm5_coop_independent(),s_coop_roster,s_proto_on,s_proto_mode,mm5_weapons_enabled(),mm5_wide_enabled(),mm5_no_flicker_enabled(),(int)s_extra_lines,mm5_coop_wait_both()};return c;
 }
 int mm5_host_apply_settings(Mm5Settings c,int local_seat) {
     s_proto_on=c.proto;s_proto_mode=c.mode;s_proto_start=1;s_coop_roster=c.roster;
     if(!mm5_proto_set(c.proto,c.mode,1))return 0;
     mm5_weapons_set(c.weapons);mm5_wide_set(c.wide,"fit");mm5_no_flicker_set(c.flicker);timing((unsigned)c.lines);
-    int view=mm5_coop_view_mode();mm5_coop_set(c.coop,c.roster);
+    int view=mm5_coop_view_mode();mm5_coop_set(c.coop,c.roster);mm5_coop_wait_both_set(c.wait_both);
     mm5_coop_view_set(c.independent?(view?view:(local_seat==1?3:2)):0);return 1;
 }
 
-static void reset(void) {if(mm5_net_locked())return;mm5_coop_set(0,s_coop_roster);mm5_weapons_set(0);s_proto_on=0;mm5_proto_set(0,s_proto_mode,s_proto_start);mm5_wide_set(0,"fit");mm5_no_flicker_set(0);timing(0); }
+static void reset(void) {if(mm5_net_locked())return;mm5_coop_set(0,s_coop_roster);mm5_coop_wait_both_set(0);mm5_weapons_set(0);s_proto_on=0;mm5_proto_set(0,s_proto_mode,s_proto_start);mm5_wide_set(0,"fit");mm5_no_flicker_set(0);timing(0); }
 static void activate_wide(void) {
     if(mm5_net_locked())return;
     char aspect[24]="fit";
@@ -60,11 +60,13 @@ static void activate_proto(void) {
 }
 static void activate_coop(void) {
     if(mm5_net_locked())return;
-    const char *package="mega-man-5-usa.coop";char roster[16]="megaman",view[16]="shared";
+    const char *package="mega-man-5-usa.coop";char roster[16]="megaman",view[16]="shared",wait[16]="off";
     nes_mod_option_value(package,"coop","player-one",roster,sizeof roster);
     nes_mod_option_value(package,"coop","coop-view",view,sizeof view);
+    nes_mod_option_value(package,"coop","wait-for-both",wait,sizeof wait);
     activate_proto();s_coop_roster=!strcmp(roster,"protoman");mm5_coop_set(1,s_coop_roster);
     mm5_coop_view_set(!strcmp(view,"split")?1:!strcmp(view,"p1")?2:!strcmp(view,"p2")?3:0);
+    mm5_coop_wait_both_set(!strcmp(wait,"on"));
 }
 NES_MOD_CONSTRUCTOR(register_mm5) {
     mm5_weapons_register();
@@ -111,6 +113,10 @@ static bool option(void *ctx, const char *name, const char *value) {
         s_coop_roster=!strcmp(value,"protoman");mm5_coop_set(mm5_coop_enabled(),s_coop_roster);return true;
     }
     if(!strcmp(name,"--coop-test-poke"))return mm5_coop_test_poke(value);
+    if(!strcmp(name,"--coop-wait-both")) {
+        if(strcmp(value,"on") && strcmp(value,"off"))return false;
+        mm5_coop_wait_both_set(!strcmp(value,"on"));return true;
+    }
     if(!strcmp(name,"--coop-view")) {
         int mode=!strcmp(value,"shared")?0:!strcmp(value,"split")?1:!strcmp(value,"p1")?2:!strcmp(value,"p2")?3:-1;
         if(mode<0)return false;mm5_coop_view_set(mode);return true;
@@ -163,18 +169,23 @@ static void tcp(void *ctx) { (void)ctx; cyc_tcp_register("mm5_state", "MM5 state
 #ifdef CYC_WITH_RECOMP_UI
 static int menu_get(void *ctx,const RecompRuntimeUiItem *item,int *out) {
     (void)ctx;
+    if(!strcmp(item->key,"mm5.coop_wait_both")){*out=mm5_coop_wait_both();return 1;}
     if(strcmp(item->key,"mm5.coop_view"))return 0;
     *out=mm5_coop_view_mode();return 1;
 }
 static int menu_set(void *ctx,const RecompRuntimeUiItem *item,int value) {
     (void)ctx;
+    if(!strcmp(item->key,"mm5.coop_wait_both")) {
+        if(!mm5_coop_enabled() || mm5_net_locked() || value<0 || value>1)return 0;
+        mm5_coop_wait_both_set(value);return mm5_coop_wait_both()==value;
+    }
     if(strcmp(item->key,"mm5.coop_view") || !mm5_coop_enabled() || value<0 || value>3)return 0;
     if(mm5_net_locked() && (value!=0)!=mm5_coop_independent())return 0;
     mm5_coop_view_set(value);return mm5_coop_view_mode()==value;
 }
 static int menu_enabled(void *ctx,const RecompRuntimeUiItem *item) {
     (void)ctx;
-    return !strcmp(item->key,"mm5.coop_view") && mm5_coop_enabled();
+    return (!strcmp(item->key,"mm5.coop_view") || !strcmp(item->key,"mm5.coop_wait_both")) && mm5_coop_enabled();
 }
 #ifdef CYC_HOST_EXTRAS_HAS_NETPLAY_VALUE_POLICY
 static bool menu_netplay_value_allowed(void *ctx,const RecompRuntimeUiItem *item,int value) {
@@ -187,7 +198,10 @@ static const char *const view_choices[]={"Shared screen","Split screen","Player 
 static const RecompRuntimeUiItem menu_items[]={
     {.key="mm5.coop_view",.section="Display",.label="Two-player view",
      .description="Choose a view. Online matches keep their camera mode.",
-     .type=RECOMP_RUNTIME_UI_CHOICE,.minimum=0,.maximum=3,.step=1,.choices=view_choices,.choice_count=4}
+     .type=RECOMP_RUNTIME_UI_CHOICE,.minimum=0,.maximum=3,.step=1,.choices=view_choices,.choice_count=4},
+    {.key="mm5.coop_wait_both",.section="Game",.label="Wait for both players",
+     .description="Wait at room exits. A lone survivor can continue.",
+     .type=RECOMP_RUNTIME_UI_BOOL,.minimum=0,.maximum=1,.step=1}
 };
 static const RecompRuntimeUiCallbacks menu_callbacks={.get_value=menu_get,.set_value=menu_set,.is_enabled=menu_enabled};
 #endif
@@ -211,10 +225,11 @@ const CycHostExtras *cyc_host_extras(void) {
         {"--slowdown-reduction", true, "on|off: extra game CPU time; off restores stock timing"},
         {"--no-flicker", true, "on|off: retain complete actors beyond scanline and OAM limits"},
         {"--coop-view", true, "shared|split|p1|p2: co-op display and independent native cameras"},
+        {"--coop-wait-both", true, "on|off: wait for both players at room exits (default off)"},
     };
     static const CycHostExtras extras = {
         .power_on = power, .state_loaded = loaded, .input = input, .frame_end = end, .tcp_setup = tcp,
-        .option = option, .options = options, .option_count = 13, .input_profile = &profile,
+        .option = option, .options = options, .option_count = sizeof options/sizeof options[0], .input_profile = &profile,
 #ifdef CYC_WITH_RECOMP_UI
         .menu_items=menu_items,.menu_item_count=sizeof menu_items/sizeof menu_items[0],.menu_callbacks=&menu_callbacks,
 #ifdef CYC_HOST_EXTRAS_HAS_NETPLAY_VALUE_POLICY

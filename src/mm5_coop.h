@@ -19,6 +19,8 @@ int mm5_coop_character_at(int seat);
 int mm5_coop_view_mode(void);
 int mm5_coop_independent(void);
 void mm5_coop_view_set(int mode);
+int mm5_coop_wait_both(void);
+void mm5_coop_wait_both_set(int enabled);
 int mm5_coop_view_rects(int left[2]);
 int mm5_coop_scene_locked(void);
 int mm5_coop_menu_active(void);

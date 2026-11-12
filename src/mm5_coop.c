@@ -32,15 +32,16 @@ typedef struct {
     uint8_t raw[2],raw_previous[2],fresh[2];
     uint8_t ai_active,ai_actor,ai_common,ai_pad[2],ai_camera_owned,ai_camera[3],ai_area[3],wiping,retry,menu_user,menu_busy,menu_cursor[2];
     uint8_t withdrawn,select_hold[2],select_armed[2],checkpoint,revive_pending;
-    uint8_t scene_active,follow,section,scene_page,scene_vertical,scene_scroll_y,outro,camera_owner;
+    uint8_t scene_active,follow,section,scene_page,scene_vertical,scene_scroll_y,outro,camera_owner,wait_mode,waiting;
     uint32_t last_step[2];
     Player player[2];Picture build,frame;
     uint64_t updates[2],world_updates,failures,hits[2],contacts[2],deaths[2],handoffs,wipes,targets[2],checks;
     uint64_t withdrawals[2],rejoins[2],revivals[2];
     uint64_t transitions,arrivals[2];
+    uint8_t wait_direction[2],wait_page[2],wait_out[2],wait_flags[2];
 } Coop;
 static Coop C;
-static int s_on,s_requested,s_roster,s_scope,s_personal_bhv,s_view;
+static int s_on,s_requested,s_roster,s_scope,s_personal_bhv,s_view,s_wait_both;
 static uint16_t s_addr[PERSONAL_CAP],s_index[2048];
 static int s_count;
 static int checkpoint_at(int screen);
@@ -48,6 +49,8 @@ static void scene_tick(void);
 static void follow_arrivals(void);
 static void scene_shift(void);
 static void outro_tick(void);
+static void finish_wait(void);
+static int partner_present(int seat);
 static void reset_select(void) {
     memset(C.select_hold,0,sizeof C.select_hold);memset(C.select_armed,0,sizeof C.select_armed);
 }
@@ -67,6 +70,11 @@ int mm5_coop_character(void) { return s_on?(s_roster^C.current):-1; }
 int mm5_coop_character_at(int seat) {return s_on && seat>=0 && seat<2?(s_roster^seat):0;}
 int mm5_coop_view_mode(void) {return s_on?s_view:0;}
 int mm5_coop_independent(void) {return s_on && s_view!=0;}
+int mm5_coop_wait_both(void) {return s_wait_both;}
+void mm5_coop_wait_both_set(int enabled) {
+    if(mm5_net_locked())return;
+    s_wait_both=enabled!=0;if(!s_wait_both)finish_wait();
+}
 int mm5_coop_scene_locked(void) {
     /* Story/ending scripts and Big Pets' IRQ-drawn body own the native
      * camera and background. Keep activation and presentation on that view. */
@@ -249,7 +257,7 @@ static void initialize(void) {
     }
     C.retry=C.wiping=0;
     C.withdrawn=C.revive_pending=0;C.checkpoint=(uint8_t)checkpoint_at(R(0x69));
-    C.scene_active=C.follow=C.scene_vertical=C.scene_scroll_y=C.outro=0;C.section=R(0x29)&31;C.scene_page=R(0xF9);
+    C.scene_active=C.follow=C.scene_vertical=C.scene_scroll_y=C.outro=C.waiting=0;C.section=R(0x29)&31;C.scene_page=R(0xF9);
     reset_select();
     int x=(R(0x348)<<8)|R(0x330);x=x>=32?x-16:x+16;
     set_personal(&C.player[1],0x330,x);set_personal(&C.player[1],0x348,x>>8);
@@ -279,6 +287,7 @@ static int controller(uint16_t address) {
     }
     if(C.menu || R(0x26)>=16)return 0;
     C.current=C.anchor;capture(&C.player[C.anchor]);deaths();
+    for(int seat=0;seat<2;seat++)if((C.waiting&(1u<<seat)) && !partner_present(seat^1)){finish_wait();break;}
     if(C.player[C.anchor].dead && !C.player[C.anchor^1].dead && !(C.withdrawn&(1u<<(C.anchor^1)))) {
         C.anchor^=1;C.current=C.anchor;project(&C.player[C.anchor]);C.handoffs++;
         mm5_weapons_dispatch(0xDEB1);P(0x18,255);
@@ -556,7 +565,9 @@ static void start_arrival(int seat,int x,int y,int heal) {
     for(int a=0x33;a<=0x3F;a++)set_personal(p,a,0);
     set_personal(p,0x30,8);set_personal(p,0x31,0);set_personal(p,0x37,0);set_personal(p,0x5B,0);set_personal(p,0x52,0);
     set_personal(p,0x330,x);set_personal(p,0x348,x>>8);set_personal(p,0x378,0);set_personal(p,0x390,0);
-    set_personal(p,0x318,0);set_personal(p,0x360,0);set_personal(p,0x3A8,0);set_personal(p,0x3C0,0);
+    /* The native beam only uses vertical speed. Ground movement retains its
+     * cached horizontal speed ($03A8/$03C0); clearing it strands the returnee. */
+    set_personal(p,0x318,0);set_personal(p,0x360,0);
     set_personal(p,0x3D8,0);set_personal(p,0x3F0,8);set_personal(p,0x558,0x13);set_personal(p,0x540,0);set_personal(p,0x570,0);
     set_personal(p,0x528,0x80|(R(0x528)&0x20));set_personal(p,0x5B8,0);
     if(heal){set_personal(p,0xB0,0x9C);C.revivals[seat]++;}
@@ -613,26 +624,69 @@ static int exit_intent(int seat) {
     if((flags&32) && !(flags&0xC0)) {
         int next=mm5_cart_prg(C.stage,0xA951+section);
         if(local==R(0x2A) && x>240 && wx>oldx && !R(0x55) && (next&32) && !(next&0xC0))return 1;
-        if(!local && x<16 && wx<oldx && section && (mm5_cart_prg(C.stage,0xA968+section)&64) &&
-            (mm5_cart_prg(C.stage,0xA94F+section)&32))return 1;
+        if(!local && x<=16 && wx<oldx && section && (mm5_cart_prg(C.stage,0xA968+section)&64) &&
+            (mm5_cart_prg(C.stage,0xA94F+section)&32))return 2;
     }
     if(page==R(0xF9) && R(0xFC))return 0;
     int direction=0;
-    if(R(0xAF)) {if(y<8)direction=128;else if(y>=232 && state==3)direction=64;}
+    if(personal(p,0xAF)) {if(y<8)direction=128;else if(y>=232 && state==3)direction=64;}
     else {if(y>=232)direction=64;else if(y<8 && (personal(p,0x37) || state==3))direction=128;}
     if(!direction)return 0;
     /* CFF0 first checks explicit per-screen vertical links. */
     for(int i=0;i<32;i+=4) {
         int screen=mm5_cart_prg(C.stage,0xA9E0+i);if(screen&128)break;
-        if(screen==page) {if(mm5_cart_prg(C.stage,0xA9E1+i)==direction)return 1;break;}
+        if(screen==page) {if(mm5_cart_prg(C.stage,0xA9E1+i)==direction)return direction;break;}
     }
     if(flags&0xC0) {
-        if(flags&direction)return local<=R(0x2A);
-        return local>0 || section>0;
+        if(flags&direction)return local<=R(0x2A)?direction:0;
+        return local>0 || section>0?direction:0;
     }
     int next=mm5_cart_prg(C.stage,0xA951+section);
-    if((!R(0x2A) && (next&direction)) || (local && local==R(0x2A)))return (next&direction)!=0;
-    return !local && section && (header&0xC0) && (((header&0xC0)^0xC0)&direction);
+    if((!R(0x2A) && (next&direction)) || (local && local==R(0x2A)))return (next&direction)?direction:0;
+    return !local && section && (header&0xC0) && (((header&0xC0)^0xC0)&direction)?direction:0;
+}
+static void finish_wait(void) {
+    if(!C.waiting)return;
+    for(int seat=0;seat<2;seat++)if(C.waiting&(1u<<seat)) {
+        Player *p=&C.player[seat];p->teleport=TELE_NONE;
+        set_personal(p,0x390,C.wait_out[seat]);
+        set_personal(p,0x528,(C.wait_flags[seat]&0xBF)|(personal(p,0xAF)?64:0));
+        if(C.initialized && seat==C.current)project(p);
+    }
+    C.waiting=0;reset_select();
+}
+static int partner_present(int seat) {
+    const Player *p=&C.player[seat];
+    return !p->dead && !(C.withdrawn&(1u<<seat)) && (personal(p,0xB0)&31) && personal(p,0x30)!=7;
+}
+/* Native shutters hold the contact column. A vertical exit may leave the
+ * room before its partner: hide that body without advancing the script,
+ * then restore it when the same authored exit is reached by the other seat. */
+static int wait_for_partner(int seat,int direction) {
+    int other=seat^1;Player *p=&C.player[seat],*peer=&C.player[other];
+    if(!s_wait_both || !partner_present(other)){finish_wait();return 0;}
+    if(direction<=2) {
+        int x=personal(peer,0x330);
+        if(peer->teleport==TELE_NONE && !personal(peer,0x390) &&
+           personal(peer,0x348)==personal(p,0x348) && (direction==1?x>=224:x<=32))return 0;
+        set_personal(p,0x330,direction==1?240:17);set_personal(p,0x318,0);
+    } else {
+        if((C.waiting&(1u<<other)) && C.wait_direction[other]==direction &&
+           C.wait_page[other]==personal(p,0x348)){finish_wait();return 0;}
+        if(C.waiting&(1u<<other)) {
+            /* An opposite exit stays inside the room so it can turn back. */
+            set_personal(p,0x378,direction==128?24:216);set_personal(p,0x390,0);set_personal(p,0x30,1);
+            set_personal(p,0x360,0);set_personal(p,0x3D8,0);set_personal(p,0x3F0,0);
+        } else {
+            C.wait_direction[seat]=(uint8_t)direction;C.wait_page[seat]=(uint8_t)personal(p,0x348);
+            C.wait_out[seat]=(uint8_t)personal(p,0x390);C.wait_flags[seat]=(uint8_t)personal(p,0x528);
+            for(int base=0x300;base<=0x5B8;base+=24)for(int slot=1;slot<8;slot++)set_personal(p,base+slot,0);
+            set_personal(p,0x37,0);set_personal(p,0x38,0);set_personal(p,0x5B,0);set_personal(p,0x528,0);
+            p->teleport=TELE_HIDDEN;C.waiting|=(uint8_t)(1u<<seat);reset_select();
+        }
+    }
+    if(seat==C.current)project(p);
+    return 1;
 }
 static int scene_camera(int page) {
     if(!s_on)return 1;
@@ -655,13 +709,23 @@ static int before_camera(uint16_t address) {
     if(!s_on || !C.initialized || C.menu || C.ai_active || C.wiping || C.scene_active || C.follow ||
         R(0x26)!=C.stage || R(0x54) || R(0x59) || R(0x1B) || R(0x5A) || R(0xFA) || cyc_mod_isolated())return 0;
     capture(&C.player[C.anchor]);
+    for(int seat=0;seat<2;seat++)if((C.waiting&(1u<<seat)) && !partner_present(seat^1)){finish_wait();break;}
     if(C.camera_owner!=C.anchor && R(0x30)<=3) {
         if(!scene_camera(personal(&C.player[C.anchor],0x348)))return 0;
         C.camera_owner=C.anchor;
     }
     /* Seat order resolves simultaneous requests without advancing the world
      * twice or borrowing either player's inventory for the other. */
-    for(int seat=0;seat<2;seat++)if(exit_intent(seat)) {
+    for(int seat=0;seat<2;seat++) {int direction=exit_intent(seat);if(!direction)continue;
+        if(wait_for_partner(seat,direction)) {
+            if((C.waiting&(1u<<C.anchor)) && partner_present(C.anchor^1)) {
+                int other=C.anchor^1;
+                if(scene_camera(personal(&C.player[other],0x348))) {
+                    C.anchor=C.current=C.camera_owner=(uint8_t)other;project(&C.player[other]);P(0x18,255);C.handoffs++;
+                }
+            }
+            continue;
+        }
         if(!scene_camera(personal(&C.player[seat],0x348)))break;
         if(seat!=C.anchor){C.anchor=C.current=C.camera_owner=(uint8_t)seat;project(&C.player[seat]);P(0x18,255);C.handoffs++;}
         break;
@@ -721,7 +785,7 @@ static void select_tick(void) {
         !R(0x54) && !R(0x59) && !R(0x1B) && !R(0x5A) && !R(0xFA);
     for(int seat=0;seat<2;seat++) {
         Player *p=&C.player[seat];int held=(C.raw[seat]&32)!=0;
-        if(!gameplay || p->dead || (p->teleport!=TELE_NONE && p->teleport!=TELE_HIDDEN)) {C.select_hold[seat]=0;continue;}
+        if(!gameplay || p->dead || (C.waiting&(1u<<seat)) || (p->teleport!=TELE_NONE && p->teleport!=TELE_HIDDEN)) {C.select_hold[seat]=0;continue;}
         if(!held){C.select_armed[seat]=1;C.select_hold[seat]=0;}
         if(!living_visible(seat^1)){C.select_hold[seat]=0;continue;}
         if(C.withdrawn&(1u<<seat)) {
@@ -823,6 +887,7 @@ void mm5_coop_set(int enabled,int roster) {
     /* A catalog reapply disables and reenables features synchronously. Keep
      * the live personal contexts; an actual disabled frame retires them. */
     if(!enabled && (C.menu || C.ai_active || mm5_pool_busy()))return;
+    if(!enabled)finish_wait();
     if(enabled)mm5_proto_cancel_swap();
     if(!enabled && C.initialized && C.current!=C.anchor){capture(&C.player[C.current]);C.current=C.anchor;project(&C.player[C.anchor]);}
     s_on=enabled!=0;s_roster=roster!=0;if(!enabled)mm5_pool_disable();else mm5_pool_refresh();
@@ -832,11 +897,13 @@ void mm5_coop_set(int enabled,int roster) {
     nes_mod_set_local_only("MM5 personal co-op (unqualified netplay)",s_on);mm5_view_coop(s_on);
     mm5_coop_view_set(s_view);
 }
-static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC0C",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;C.independent=(uint8_t)mm5_coop_independent();memcpy(out,&C,sizeof C);return sizeof C;}
+static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC0D",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;C.independent=(uint8_t)mm5_coop_independent();C.wait_mode=(uint8_t)s_wait_both;memcpy(out,&C,sizeof C);return sizeof C;}
 static int valid(const uint8_t *in,int len) {
     if(!len)return !s_on;if(!in || len!=sizeof C)return 0;
     static Coop p;memcpy(&p,in,sizeof p);
-    if(memcmp(p.magic,"MC0C",4)||p.enabled!=s_on||p.roster!=s_roster||p.independent!=mm5_coop_independent()||p.initialized>1||p.anchor>1||p.camera_owner>1||p.current>1||p.menu>1||p.pauser>1||p.menu_user>1||p.menu_busy>1||p.menu_cursor[0]>15||p.menu_cursor[1]>15||p.ai_active>1||p.ai_camera_owned>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.outro>1||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
+    if(memcmp(p.magic,"MC0D",4)||p.enabled!=s_on||p.roster!=s_roster||p.independent!=mm5_coop_independent()||p.wait_mode!=s_wait_both||p.waiting>3||((!p.enabled||!p.wait_mode)&&p.waiting)||p.initialized>1||p.anchor>1||p.camera_owner>1||p.current>1||p.menu>1||p.pauser>1||p.menu_user>1||p.menu_busy>1||p.menu_cursor[0]>15||p.menu_cursor[1]>15||p.ai_active>1||p.ai_camera_owned>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.outro>1||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
+    for(int seat=0;seat<2;seat++)if((p.waiting&(1u<<seat)) &&
+        (p.player[seat].teleport!=TELE_HIDDEN || (p.wait_direction[seat]!=64 && p.wait_direction[seat]!=128) || p.wait_page[seat]>=0x4F))return 0;
     for(int seat=0;seat<2;seat++)if(personal(&p.player[seat],0xAF)>1)return 0;
     for(int seat=0;seat<2;seat++)if(p.select_hold[seat]>90 || p.select_armed[seat]>1)return 0;
     for(int seat=0;seat<2;seat++)if(p.player[seat].arrival_follow>1 || p.player[seat].entry_state>3)return 0;
@@ -868,7 +935,7 @@ void mm5_coop_register(void) {
     nes_mod_register_savestate_hook("mm5.coop",get,set);nes_mod_register_savestate_validator("mm5.coop",valid);
 }
 int mm5_coop_json(char *out,int cap) {
-    return snprintf(out,cap,"\"coop\":{\"on\":%d,\"ready\":%u,\"anchor\":%u,\"menu\":%u,\"pauser\":%u,\"world\":%llu,\"updates\":[%llu,%llu],\"failed\":%llu,\"combat\":[[%llu,%llu],[%llu,%llu]],\"deaths\":[%llu,%llu],\"handoffs\":%llu,\"wipes\":%llu,\"targets\":[%llu,%llu],\"checks\":%llu,\"shots\":[[%d,%d,%d],[%d,%d,%d]],\"transport\":[%u,%u,%u,%u,%u],\"withdrawals\":[%llu,%llu],\"rejoins\":[%llu,%llu],\"revivals\":[%llu,%llu],\"scene\":[%u,%u,%u,%u],\"transitions\":%llu,\"outro\":%u,\"arrivals\":[%llu,%llu],\"pages\":[%d,%d],\"boss\":[%u,%u,%u],\"progress\":[%u,%u,%u,%u,%u],\"lives\":%u,\"tanks\":[%u,%u],\"coil\":[%d,%d],\"napalm\":[%d,%d],\"actor8\":[%u,%u,%u,%u,%u],\"players\":[[%d,%d,%d,%d,%d],[%d,%d,%d,%d,%d]]}",
+    return snprintf(out,cap,"\"coop\":{\"on\":%d,\"ready\":%u,\"anchor\":%u,\"menu\":%u,\"pauser\":%u,\"world\":%llu,\"updates\":[%llu,%llu],\"failed\":%llu,\"combat\":[[%llu,%llu],[%llu,%llu]],\"deaths\":[%llu,%llu],\"handoffs\":%llu,\"wipes\":%llu,\"targets\":[%llu,%llu],\"checks\":%llu,\"shots\":[[%d,%d,%d],[%d,%d,%d]],\"transport\":[%u,%u,%u,%u,%u],\"withdrawals\":[%llu,%llu],\"rejoins\":[%llu,%llu],\"revivals\":[%llu,%llu],\"scene\":[%u,%u,%u,%u],\"transitions\":%llu,\"outro\":%u,\"arrivals\":[%llu,%llu],\"pages\":[%d,%d],\"boss\":[%u,%u,%u],\"progress\":[%u,%u,%u,%u,%u],\"lives\":%u,\"tanks\":[%u,%u],\"coil\":[%d,%d],\"napalm\":[%d,%d],\"actor8\":[%u,%u,%u,%u,%u],\"wait_both\":%d,\"waiting\":%u,\"players\":[[%d,%d,%d,%d,%d],[%d,%d,%d,%d,%d]]}",
         s_on,C.initialized,C.anchor,C.menu,C.pauser,(unsigned long long)C.world_updates,(unsigned long long)C.updates[0],(unsigned long long)C.updates[1],(unsigned long long)C.failures,
         (unsigned long long)C.hits[0],(unsigned long long)C.contacts[0],(unsigned long long)C.hits[1],(unsigned long long)C.contacts[1],
         (unsigned long long)C.deaths[0],(unsigned long long)C.deaths[1],(unsigned long long)C.handoffs,(unsigned long long)C.wipes,
@@ -880,6 +947,7 @@ int mm5_coop_json(char *out,int cap) {
         C.scene_active,C.follow,C.section,C.scene_page,(unsigned long long)C.transitions,C.outro,(unsigned long long)C.arrivals[0],(unsigned long long)C.arrivals[1],
         personal(&C.player[0],0x348),personal(&C.player[1],0x348),
         R(0x56),R(0x56)<24?R(0x300+R(0x56)):0,R(0x56)<24?R(0x450+R(0x56)):0,R(0x69),R(0x6E),R(0x6F),R(0x2F),R(0x22),R(0xBF),R(0xBD)&15,R(0xBE)&15,mm5_coop_read(0,0xBA)&31,mm5_coop_read(1,0xBA)&31,mm5_coop_read(0,0xB4),mm5_coop_read(1,0xB4),R(0x308),R(0x458),R(0x338),R(0x380),R(0x428),
+        s_wait_both,C.waiting,
         personal(&C.player[0],0x330),personal(&C.player[0],0x378),personal(&C.player[0],0xB0)&31,personal(&C.player[0],0x32),personal(&C.player[0],0x30),
         personal(&C.player[1],0x330),personal(&C.player[1],0x378),personal(&C.player[1],0xB0)&31,personal(&C.player[1],0x32),personal(&C.player[1],0x30));
 }

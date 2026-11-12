@@ -1,6 +1,6 @@
 #pragma once
 #include <stdint.h>
-typedef struct {int coop,independent,roster,proto,mode,weapons,wide,flicker,lines;} Mm5Settings;
+typedef struct {int coop,independent,roster,proto,mode,weapons,wide,flicker,lines,wait_both;} Mm5Settings;
 int mm5_net_locked(void);
 int mm5_net_simulation_width(int local_width);
 void mm5_net_note_option(const char *name);
