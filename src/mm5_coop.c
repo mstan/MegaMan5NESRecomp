@@ -301,7 +301,10 @@ static int ai_begin(uint16_t address) {
     if(actor<8 || actor>=24 || !R(0x300+actor))return 0;
     capture(&C.player[C.current]);
     int seat=C.anchor,ex=(R(0x348+actor)<<8)|R(0x330+actor),ey=R(0x378+actor);int64_t best=INT64_MAX;
-    for(int i=0;!C.outro && i<2;i++)if(!C.player[i].dead && C.player[i].teleport==TELE_NONE && !(C.withdrawn&(1u<<i)) && (personal(&C.player[i],0xB0)&31)) {
+    /* B3 freezes actor0 and releases that same actor after the HP fill.
+     * Retargeting between those writes strands the first personal actor. */
+    int intro=R(0x300+actor)==0xB3;
+    for(int i=0;!intro && !C.outro && i<2;i++)if(!C.player[i].dead && C.player[i].teleport==TELE_NONE && !(C.withdrawn&(1u<<i)) && (personal(&C.player[i],0xB0)&31)) {
         int dx=((personal(&C.player[i],0x348)<<8)|personal(&C.player[i],0x330))-ex;
         int dy=personal(&C.player[i],0x378)-ey;int64_t distance=(int64_t)dx*dx+(int64_t)dy*dy;
         if(distance<best){best=distance;seat=i;}
