@@ -95,7 +95,10 @@ static int shot(uint16_t address) {
     S.limited++; return 1;
 }
 static int muzzle_y(void) {
-    int state = R(0x30), offset = state == 1 ? -5 : state == 3 ? -4 : 3;
+    /* The canonical airborne-fire body places its cannon at Y+3; apply
+     * native vertical flip to that origin without changing ladder poses. */
+    int state = R(0x30), offset = state == 3 ? -4 : 3;
+    if (state == 1 && (R(0x528) & 64)) offset = -offset;
     int pose = R(0x558) - R(0x34);
     if (state == 0 && pose == 4 && (R(0x540) & 3) == 1) offset--;
     return R(0x378) + offset;
