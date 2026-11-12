@@ -31,7 +31,7 @@ void mm5_net_note_option(const char *name) {
 #ifndef MM5_NETPLAY_QUALIFIED
 #define MM5_NETPLAY_QUALIFIED 0
 #endif
-static Mm5Settings s_offer,s_offline;
+static Mm5Settings s_offer,s_offline,s_offline_offer;
 static int s_saved,s_offline_view,s_offline_video,s_offline_width;
 static int selected(const char *id,const char *feature) {return nes_mod_feature_selected(id,feature)!=0;}
 static int option_is(const char *id,const char *feature,const char *key,const char *want,const char *fallback) {
@@ -79,8 +79,17 @@ static int settings_apply(const char *value) {
     if(sscanf(value,"%d:%d:%d:%d:%d:%d:%d:%d:%d:%d:%d%n",&version,&c.coop,&c.independent,&c.roster,&c.proto,&c.mode,&c.weapons,&c.wide,&c.flicker,&c.lines,&c.wait_both,&n)!=11 || value[n] || version!=2)return 0;
     if(c.coop!=1 || c.proto!=1 || c.independent<0 || c.independent>1 || c.roster<0 || c.roster>1 || c.mode<0 || c.mode>1 ||
         c.weapons<0 || c.weapons>1 || c.wide<0 || c.wide>1 || c.flicker<0 || c.flicker>1 || c.wait_both<0 || c.wait_both>1 || (c.lines!=0 && c.lines!=262) || (c.independent && s_width!=256))return 0;
-    if(!s_saved){s_offline=mm5_host_settings();s_offline_view=mm5_coop_view_mode();s_offline_video=cyc_video_mode();s_offline_width=cyc_video_width();s_saved=1;}
-    s_applying=1;int ok=mm5_host_apply_settings(c,nes_netplay_local_slot());s_applying=0;if(!ok)return 0;
+    if(!s_saved){s_offline=mm5_host_settings();s_offline_offer=offer();s_offline_view=mm5_coop_view_mode();s_offline_video=cyc_video_mode();s_offline_width=cyc_video_width();s_saved=1;}
+    s_applying=1;int ok=mm5_host_apply_settings(c,nes_netplay_local_slot());
+    /* The online catalog defers activation plugins. Keep its local view
+     * preference while the host's shared/independent class stays sealed. */
+    if(ok && c.independent && !(s_cli&1) && cyc_session_mods_enabled()) {
+        const char *coop="mega-man-5-usa.coop";
+        if(option_is(coop,"coop","coop-view","split","shared"))mm5_coop_view_set(1);
+        else if(option_is(coop,"coop","coop-view","p1","shared"))mm5_coop_view_set(2);
+        else if(option_is(coop,"coop","coop-view","p2","shared"))mm5_coop_view_set(3);
+    }
+    s_applying=0;if(!ok)return 0;
     s_sealed=1;nes_netplay_require_capabilities(1);nes_netplay_require_player_count(2);
     if(!c.independent)cyc_video_request_width(s_width);
     if(!getenv("NES_NET_INPUT_PLAYER")) {
@@ -99,6 +108,18 @@ static void settings_restore(void) {
     s_sealed=0;if(s_saved){
         mm5_host_apply_settings(s_offline,0);mm5_coop_view_set(s_offline_view);
         if(s_offline_video==NES_VIDEO_STOCK && !s_offline.independent)cyc_video_request_width(s_offline_width);else cyc_video_set_mode(s_offline_video);
+        /* Optional readback of the actual restore callback. Inactive catalog
+         * preferences can differ from active runtime settings; preserve each. */
+        const char *record=getenv("MM5_NET_RESTORE_RECORD");
+        if(record && *record) {
+            char expected[192],actual[192],original[192],next[192];
+            describe(s_offline,expected,sizeof expected);settings_get(actual,sizeof actual);
+            describe(s_offline_offer,original,sizeof original);describe(offer(),next,sizeof next);
+            FILE *f=fopen(record,"w");if(f) {
+                fprintf(f,"{\"expected\":\"%s\",\"actual\":\"%s\",\"original_offer\":\"%s\",\"next_offer\":\"%s\",\"expected_view\":%d,\"view\":%d,\"expected_video_mode\":%d,\"video_mode\":%d}\n",
+                    expected,actual,original,next,s_offline_view,mm5_coop_view_mode(),s_offline_video,cyc_video_mode());fclose(f);
+            }
+        }
         s_saved=0;
     }
     nes_netplay_require_capabilities(0);nes_netplay_require_player_count(0);nes_netplay_set_input_player(-1);
