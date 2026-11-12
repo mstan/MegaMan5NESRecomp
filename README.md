@@ -15,7 +15,7 @@ The development branch adds L/R selection of acquired weapons and helpers, plus 
 
 These controls have native/interpreter and current-build cold-state checks. Native inventory portraits and previews are implemented. Adaptive Fit extends horizontal terrain and activates native actors across the view, with a qualified Napalm Man traversal and cold-state continuation.
 
-Proto Man's airborne Buster follows the canonical firing sprite, including inverted poses. Both directions and both co-op seats have native/interpreter and current-build cold-state checks; the grounded control retains its pixels and audio. Native gravity triggers remain part of stage qualification.
+Proto Man's airborne Buster follows the canonical firing sprite, including inverted poses. Both directions and both co-op seats have native/interpreter and current-build cold-state checks; the grounded control retains its pixels and audio.
 
 The optional Co-op package enables Proto Man as a dependency and assigns complementary characters. Its settings select the first player's character, shared/split/individual view and local online binding row. Shared view keeps both bodies visible; independent views use two native 256x240 rectangles. `--coop on`, `--coop-roster megaman|protoman` and `--coop-view shared|split|p1|p2` provide explicit development controls. Native READY text and hurt effects remain intact. Ordinary enemies use native AI once, targeting the nearer living player while checking both players' shots and personal damage. A survivor continues without spending a life; a full wipe uses one native checkpoint retry and revives both players.
 
@@ -25,7 +25,7 @@ In ordinary horizontal and vertical rooms, holding Select for 90 frames withdraw
 
 The follower departs and returns through native animations when the leading player triggers a room transition. Either player can lead qualified Napalm Man downward or horizontal exits, including independent-view exits several pages beyond the source camera. These cases have native/interpreter and current-build cold-state checks, including exact warm/cold arrival screenshots. Unsafe inventory and weapon presses during these transitions are discarded. Idle vertical rooms retain weapon switching, solo character swapping and airborne shield behavior after scrolling ends.
 
-Gravity Man room transitions keep the follower alive through departure and restore the inverted entry pose on arrival. The actual native door sequence has interpreter and mid-departure cold-state checks, including PCM and resumed pictures.
+Gravity panels apply their original contact routine separately to each player, so one player can stand on the ceiling while the other uses normal gravity. Gravity Man's arena flips and the native boss-death reset reach both players. Inverted players can withdraw and rejoin beside a ceiling partner while retaining personal health and equipment. Native door, boss and rejoin continuations match between native/interpreter execution and current-build cold loading, including PCM and resumed pictures.
 
 Shared-view co-op displays both players' health and selected-weapon energy using the cartridge's native meter routine and tiles. Proto Man's health meter has the blueprint's red tint. The meters have personal resource, inventory-resume and exact cold-load screenshot checks; isolated HUD construction preserves the accepted combat simulation.
 

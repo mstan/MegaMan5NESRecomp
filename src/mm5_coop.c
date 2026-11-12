@@ -111,6 +111,7 @@ static void addresses(void) {
     for(int i=0;i<sizeof zp;i++)s_addr[s_count++]=zp[i];
     for(int a=0xB0;a<=0xBC;a++)s_addr[s_count++]=(uint16_t)a;
     for(int i=0;i<8;i++){s_addr[s_count++]=(uint16_t)(0x610+i);s_addr[s_count++]=(uint16_t)(0x630+i);}
+    s_addr[s_count++]=0xAF; /* Native panel gravity belongs to its touching body. */
     for(int i=0;i<s_count;i++)s_index[s_addr[i]]=(uint16_t)(i+1);
 }
 static void capture(Player *p) { for(int i=0;i<s_count;i++)p->ram[i]=R(s_addr[i]); }
@@ -211,13 +212,13 @@ static int private_step(int seat) {
         r.x=0;ok=cyc_mod_call(0xEA03,&r);if(ok){r.x=0;ok=cyc_mod_call(0xE92A,&r);}
         int y=R(0x378);if(R(0x390) || y>p->arrival_floor)y=p->arrival_floor;
         P(0x378,y);P(0x390,0);P(0x3E,y);P(0x3F,0);P(0x540,0);P(0x570,0);
-    } else if(ok && p->teleport==TELE_IN && p->arrival_follow) {
+    } else if(ok && p->teleport==TELE_IN && (p->arrival_follow || (p->entry_flags&64))) {
         /* A room may enter in midair or on a ladder. Open the native frameset
          * without falling to a different floor, then restore that entry pose. */
         if(!R(0x540) && R(0x570)==1)sound(0x2D);
         if(R(0x540)>=4) {
             P(0x30,p->entry_state);P(0x558,p->entry_subtype);P(0x35,p->entry_ladder);
-            P(0x528,p->entry_flags);P(0x540,p->entry_phase);P(0x570,0);P(0x360,0);P(0x3D8,0);P(0x3F0,0);
+            P(0x528,p->entry_flags);P(0xAF,(p->entry_flags>>6)&1);P(0x540,p->entry_phase);P(0x570,0);P(0x360,0);P(0x3D8,0);P(0x3F0,0);
         }
     } else if(ok && p->teleport==TELE_IN && !R(0x54)) {
         /* Original stage entry ignores floors above Y112. A checked rejoin
@@ -362,14 +363,41 @@ static int other_collision(int seat,int actor) {
     if(enabled)hooks(0);s_scope=0;cyc_mod_isolate_end();C.current=(uint8_t)owner;mm5_world_private_end(ok);
     if(ok)merge_world(before,after);return ok;
 }
+/* Types6/7/8 are pure native panel contact routines ($05:A000/A035),
+ * rather than independent clocks. Test each living body against the same
+ * authored panel, preserving its own gravity and the native sound request. */
+static int other_panel_collision(int seat,int actor,int type) {
+    Player *p=&C.player[seat];
+    if(p->dead || p->teleport!=TELE_NONE || (C.withdrawn&(1u<<seat)) || !(personal(p,0xB0)&31))return 1;
+    uint8_t before[2048],after[2048];snapshot_ram(before);
+    if(!cyc_mod_isolate_begin())return 0;
+    mm5_world_private_begin();int owner=C.current;C.current=(uint8_t)seat;project(p);
+    CycModRegs r;cyc_mod_regs(&r);int ok=1;
+    if(R(0xF6)!=5){P(0xF6,5);ok=cyc_mod_call(0xFF43,&r);}
+    r.x=(uint8_t)actor;
+    if(ok)ok=cyc_mod_call(type==8?0xA035:0xA000,&r);
+    if(ok){capture(p);snapshot_ram(after);}
+    cyc_mod_isolate_end();C.current=(uint8_t)owner;mm5_world_private_end(ok);
+    if(ok)merge_world(before,after);return ok;
+}
 static int personal_end(uint16_t address) {
     (void)address;
     /* Finish the native loop at its common terrain-hazard check, after slot7.
      * Returning from here would incorrectly omit the player's spike checks. */
     if(s_on && s_scope && s_personal_bhv && R(0xA6)>=7)P(0xA6,23);
     if(s_on && C.ai_active && !cyc_mod_isolated()) {
+        int type=R(0x300+C.ai_actor),panel=type>=6 && type<=8;
+        int previous_gravity=personal(&C.player[C.current],0xAF),gravity=R(0xAF),flip=R(0x528)&64;
         capture(&C.player[C.current]);
-        if(C.ai_common && !other_collision(C.current^1,C.ai_actor))C.failures++;
+        /* The remaining native AI writers are Gravity Man ($07:A040),
+         * his introduction ($0A:A2C1) and boss death ($0A:A12F). Their
+         * authored arena changes apply to both personal bodies. */
+        if(!panel && previous_gravity!=gravity)for(int seat=0;seat<2;seat++) {
+            set_personal(&C.player[seat],0xAF,gravity);
+            set_personal(&C.player[seat],0x528,(personal(&C.player[seat],0x528)&0xBF)|flip);
+        }
+        if(panel) {if(!other_panel_collision(C.current^1,C.ai_actor,type))C.failures++;}
+        else if(C.ai_common && !other_collision(C.current^1,C.ai_actor))C.failures++;
         if(personal(&C.player[C.current],0x30)>=9 && !C.player[C.current].dead)C.anchor=C.current;
         if(C.ai_camera_owned) {
             if(R(0x30)<9 && R(0x28)==C.ai_area[0] && R(0x29)==C.ai_area[1] && R(0x2A)==C.ai_area[2]) {
@@ -502,22 +530,23 @@ static int living_visible(int seat) {
         !personal(p,0x390) && y>=16 && y<=222 && x>=camera+8 && x<=camera+247;
 }
 static int safe_position(int *x,int *y) {
-    if(R(0x30)!=0 || R(0xAF) || R(0x390) || R(0xFA))return 0;
+    if(R(0x30)!=0 || R(0x390) || R(0xFA))return 0;
     static const int offset[]={24,-24,0,8,-8,16,-16,32,-32};
-    int base=(R(0x348)<<8)|R(0x330),yy=R(0x378),start=R(0xF9)-R(0x2B);
+    int base=(R(0x348)<<8)|R(0x330),yy=R(0x378),start=R(0xF9)-R(0x2B),side=R(0xAF)?-1:1;
     if(start<0 || yy<16 || yy>222)return 0;
     int left,right;
     if(R(0x29)&32){left=start*256+8;right=(start+R(0x2A)+1)*256-9;}
     else {left=R(0x348)*256+8;right=(R(0x348)+1)*256-9;}
     for(int i=0;i<sizeof offset/sizeof *offset;i++) {
         int xx=base+offset[i];if(xx<left || xx>right)continue;
-        if(mm5_world_class(xx-7,yy-12)==0 && mm5_world_class(xx+7,yy-12)==0 && mm5_world_class(xx,yy)==0 &&
-            mm5_world_class(xx-6,yy+12)==0x10 && mm5_world_class(xx+6,yy+12)==0x10){*x=xx;*y=yy;return 1;}
+        if(mm5_world_class(xx-7,yy-12*side)==0 && mm5_world_class(xx+7,yy-12*side)==0 && mm5_world_class(xx,yy)==0 &&
+            mm5_world_class(xx-6,yy+12*side)==0x10 && mm5_world_class(xx+6,yy+12*side)==0x10){*x=xx;*y=yy;return 1;}
     }
     return 0;
 }
 static void start_arrival(int seat,int x,int y,int heal) {
     Player *p=&C.player[seat];
+    p->entry_state=R(0x30);p->entry_subtype=(uint8_t)(R(0x558)-R(0x34));p->entry_ladder=R(0x35);p->entry_phase=R(0x540);p->entry_flags=R(0x528);
     /* Copy only the living body's native fields; inventory/CHR/palette stay
      * personal. Starting at frameset13 skips READY and its stage-specific hub
      * positioning. The native routine opens at the checked destination floor. */
@@ -689,7 +718,7 @@ static void outro_tick(void) {
 }
 static void select_tick(void) {
     int gameplay=!C.menu && !C.ai_active && !C.wiping && !C.scene_active && !C.follow && R(0x26)<16 && R(0x30)<=3 &&
-        !R(0x54) && !R(0x59) && !R(0x1B) && !R(0x5A) && !R(0xAF) && !R(0xFA);
+        !R(0x54) && !R(0x59) && !R(0x1B) && !R(0x5A) && !R(0xFA);
     for(int seat=0;seat<2;seat++) {
         Player *p=&C.player[seat];int held=(C.raw[seat]&32)!=0;
         if(!gameplay || p->dead || (p->teleport!=TELE_NONE && p->teleport!=TELE_HIDDEN)) {C.select_hold[seat]=0;continue;}
@@ -803,11 +832,12 @@ void mm5_coop_set(int enabled,int roster) {
     nes_mod_set_local_only("MM5 personal co-op (unqualified netplay)",s_on);mm5_view_coop(s_on);
     mm5_coop_view_set(s_view);
 }
-static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC0B",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;C.independent=(uint8_t)mm5_coop_independent();memcpy(out,&C,sizeof C);return sizeof C;}
+static int get(uint8_t *out,int cap) {if(cap<sizeof C)return -1;memcpy(C.magic,"MC0C",4);C.enabled=(uint8_t)s_on;C.roster=(uint8_t)s_roster;C.independent=(uint8_t)mm5_coop_independent();memcpy(out,&C,sizeof C);return sizeof C;}
 static int valid(const uint8_t *in,int len) {
     if(!len)return !s_on;if(!in || len!=sizeof C)return 0;
     static Coop p;memcpy(&p,in,sizeof p);
-    if(memcmp(p.magic,"MC0B",4)||p.enabled!=s_on||p.roster!=s_roster||p.independent!=mm5_coop_independent()||p.initialized>1||p.anchor>1||p.camera_owner>1||p.current>1||p.menu>1||p.pauser>1||p.menu_user>1||p.menu_busy>1||p.menu_cursor[0]>15||p.menu_cursor[1]>15||p.ai_active>1||p.ai_camera_owned>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.outro>1||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
+    if(memcmp(p.magic,"MC0C",4)||p.enabled!=s_on||p.roster!=s_roster||p.independent!=mm5_coop_independent()||p.initialized>1||p.anchor>1||p.camera_owner>1||p.current>1||p.menu>1||p.pauser>1||p.menu_user>1||p.menu_busy>1||p.menu_cursor[0]>15||p.menu_cursor[1]>15||p.ai_active>1||p.ai_camera_owned>1||p.ai_common>1||p.ai_actor>23||p.wiping>1||p.retry>1||p.withdrawn>3||p.revive_pending>3||p.checkpoint>2||p.scene_active>1||p.follow>3||p.section>31||p.scene_vertical>1||p.scene_scroll_y>=240||p.outro>1||p.player[0].dead>1||p.player[1].dead>1||p.player[0].teleport>TELE_IN||p.player[1].teleport>TELE_IN||p.player[0].arrival_floor>=240||p.player[1].arrival_floor>=240)return 0;
+    for(int seat=0;seat<2;seat++)if(personal(&p.player[seat],0xAF)>1)return 0;
     for(int seat=0;seat<2;seat++)if(p.select_hold[seat]>90 || p.select_armed[seat]>1)return 0;
     for(int seat=0;seat<2;seat++)if(p.player[seat].arrival_follow>1 || p.player[seat].entry_state>3)return 0;
     const Picture *f[2]={&p.build,&p.frame};
