@@ -57,7 +57,7 @@ nesrecomp_add_cycle_game(MegaMan5Recomp
 target_include_directories(MegaMan5Recomp PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${CMAKE_CURRENT_BINARY_DIR}" "${NESRECOMP_ROOT}/runner/src")
 option(MM5_ENABLE_NETPLAY "Build the shared rollback netplay and lobby" ON)
-option(MM5_NETPLAY_QUALIFIED "Enable the qualified MM5 simulation profile" ON)
+option(MM5_NETPLAY_QUALIFIED "Enable the qualified MM5 simulation profile" OFF)
 if(MM5_ENABLE_NETPLAY OR NESRECOMP_ENABLE_NET)
     nesrecomp_enable_recomp_net(MegaMan5Recomp)
     if(MM5_NETPLAY_QUALIFIED)
