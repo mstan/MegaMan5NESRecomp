@@ -66,7 +66,8 @@ static void sound(int id) {
     if (R(0xDC + q) == 0x88) { P(0xDC + q, id); P(0xDA, (q + 1) & 7); }
 }
 static int shield_up(void) {
-    return selected() && s_mode && !S.teleport && R(0x30) == 1 &&
+    int airborne=R(0x30)==1 || (R(0x26)==1 && R(0x30)==4 && R(0x558)-R(0x34)==0x1E);
+    return selected() && s_mode && !S.teleport && airborne &&
         !R(0x34) && !R(0x54) && !R(0xFA) && !R(0x390);
 }
 static int controller(uint16_t address) {
@@ -197,6 +198,10 @@ void mm5_proto_body(Mm5ProtoBody *body) {
     int throwing = R(0x34) >= 2 && body->weapon != 0;
     int base = R(0x558) - R(0x34), phase = R(0x540) & 3;
     int native_frame = drawn_frame();
+    /* Mounted Wave Man frames use sprite palette3 for the original bike and
+     * spray. Keep that equipment while replacing the human palette rows. */
+    if(R(0x26)==1 && (state==4 || state==6 || state==0x0D || state==0x0E) &&
+       base>=0x1D && base<=0x22)body->state|=MM5_PROTO_VEHICLE;
     /* Frameset1A is the blinking READY word (frames39/40), owned by
      * actor0 before its actual frameset13 arrival. It is native scene text. */
     if(state==8 && base==0x1A) {body->active=0;return;}
@@ -216,7 +221,7 @@ void mm5_proto_body(Mm5ProtoBody *body) {
     else if (state == 3) {
         body->pose = firing ? CYC_PROTO_LADDER_FIRE0 : base == 0x14 ? CYC_PROTO_LADDER_TOP0 : CYC_PROTO_LADDER0;
         if (!firing) body->right = (uint8_t)(phase & 1);
-    } else if (state == 1) body->pose = firing ? (throwing ? CYC_PROTO_THROW_JUMP : CYC_PROTO_JUMP_FIRE) :
+    } else if (state == 1 || (state==4 && base==0x1E)) body->pose = firing ? (throwing ? CYC_PROTO_THROW_JUMP : CYC_PROTO_JUMP_FIRE) :
         shield_up() ? CYC_PROTO_JUMP_GUARD : CYC_PROTO_JUMP_OPEN;
     else if (base == 4) body->pose = (uint8_t)((throwing ? CYC_PROTO_THROW_RUN0 : firing ? CYC_PROTO_FIRE_RUN0 : CYC_PROTO_RUN0) + run[phase]);
     else if (base == 0x0D) body->pose = (uint8_t)(CYC_PROTO_STEP0 + (phase & 1));

@@ -240,7 +240,7 @@ void mm5_wide_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint
     if(complete && !rank && S.frame.body.active)mm5_view_draw_character(out,width,origin,&S.frame.body);
     for (int i=0;i<S.frame.count;i++) {
         const WidePart *p=&S.frame.parts[i];if (mm5_wide_rank(p->owner)!=rank) continue;
-        if(complete && !p->owner && S.frame.body.active)continue;
+        if(complete && !p->owner && S.frame.body.active && !mm5_proto_native_part(&S.frame.body,p->attr))continue;
         for (int y=0;y<8;y++) for (int x=0;x<8;x++) {
             int v=p->pixels[y*8+x],px=p->x-left+x,py=p->y+y;
             if (!v || px<0 || px>=width || py<0 || py>=240) continue;

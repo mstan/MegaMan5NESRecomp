@@ -7,6 +7,11 @@ typedef struct {
     uint8_t pose, right, flipped, behind, active, state, weapon, charge;
     uint8_t palette[8], master[8];
 } Mm5ProtoBody;
+/* Presentation flag in the native-state byte; no guest state is changed. */
+#define MM5_PROTO_VEHICLE 0x80
+static inline int mm5_proto_native_part(const Mm5ProtoBody *body,int attr) {
+    return (body->state&MM5_PROTO_VEHICLE) && (attr&3)==3;
+}
 bool mm5_proto_set(int enabled, int mode, int start);
 void mm5_proto_register(void);
 void mm5_proto_power(void);

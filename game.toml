@@ -261,3 +261,9 @@ id = "mm5.wide.clear"
 addr = 0xC39D
 length = 8
 crc32 = 0xFB9958BD
+
+[[mod_function_hook]]
+id = "mm5.coop.vehicle-scroll"
+addr = 0xCA03
+length = 8
+crc32 = 0xC691F6F1

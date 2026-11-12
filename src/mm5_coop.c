@@ -741,7 +741,8 @@ static void scene_tick(void) {
     C.scene_page=R(0xF9);
 }
 static void follow_arrivals(void) {
-    if(C.scene_active || !C.follow || R(0x30)>3 || R(0x390) || R(0x378)>=240)return;
+    int state=R(0x30),ride=R(0x26)==1 && state==4;
+    if(C.scene_active || !C.follow || (state>3 && !ride) || R(0x390) || R(0x378)>=240)return;
     int x=(R(0x348)<<8)|R(0x330),y=R(0x378);
     for(int seat=0;seat<2;seat++)if(C.follow&(1u<<seat)) {
         if(!C.player[seat].dead && !(C.withdrawn&(1u<<seat))) {
@@ -750,6 +751,17 @@ static void follow_arrivals(void) {
         }
         C.follow&=(uint8_t)~(1u<<seat);
     }
+}
+static int vehicle_scroll(uint16_t address) {
+    (void)address;
+    /* The original Wave Man camera adds three world pixels to actor0 at
+     * $CA03. Carry the other live rider once at that same native clock. */
+    if(!s_on || !C.initialized || cyc_mod_isolated() || C.menu || C.wiping ||
+       R(0x26)!=1 || ((R(0x29)&31)!=8 && (R(0x29)&31)!=10))return 0;
+    Player *p=&C.player[C.anchor^1];
+    if(p->dead || p->teleport==TELE_HIDDEN || (C.withdrawn&(1u<<(C.anchor^1))))return 0;
+    int x=(personal(p,0x348)<<8)|personal(p,0x330);x+=3;
+    set_personal(p,0x330,x);set_personal(p,0x348,x>>8);return 0;
 }
 static int after_scroll(uint16_t address) {
     (void)address;if(!s_on || !C.initialized || R(0x26)!=C.stage || C.menu || C.ai_active || C.wiping || C.outro || cyc_mod_isolated())return 0;
@@ -870,7 +882,10 @@ void mm5_coop_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint
     int painted=0;
     for(int i=0;i<C.frame.count;i++) {
         const Part *p=&C.frame.parts[i];
-        if(!p->owner && C.frame.body.active) {if(!painted){mm5_view_draw_character(out,width,origin,&C.frame.body);painted=1;}continue;}
+        if(!p->owner && C.frame.body.active) {
+            if(!painted){mm5_view_draw_character(out,width,origin,&C.frame.body);painted=1;}
+            if(!mm5_proto_native_part(&C.frame.body,p->attr))continue;
+        }
         for(int y=0;y<8;y++)for(int x=0;x<8;x++) {
             int value=p->pixels[y*8+x],px=p->x-C.frame.camera+origin+x,py=p->y+y;
             if(!value || px<0 || px>=width || py<0 || py>=240)continue;
@@ -880,7 +895,7 @@ void mm5_coop_draw(uint32_t *out,int width,int origin,const uint8_t *opaque,uint
     }
 }
 void mm5_coop_power(void) { memset(&C,0,sizeof C);C.pending_pause=255;s_scope=s_personal_bhv=0;addresses();mm5_hud_reset();mm5_menu_reset();mm5_pool_reset(); }
-static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage","mm5.coop.scroll-end","mm5.coop.advance","mm5.coop.retreat","mm5.coop.vertical","mm5.coop.camera","mm5.coop.menu-idle"};
+static const char *const HOOKS[]={"mm5.coop.controller","mm5.coop.after-controller","mm5.coop.personal-end","mm5.coop.world-begin","mm5.coop.pause","mm5.coop.ai","mm5.coop.common","mm5.coop.stage","mm5.coop.scroll-end","mm5.coop.advance","mm5.coop.retreat","mm5.coop.vertical","mm5.coop.camera","mm5.coop.menu-idle","mm5.coop.vehicle-scroll"};
 void mm5_coop_set(int enabled,int roster) {
     if(mm5_net_locked())return;
     s_requested=enabled!=0;
@@ -906,7 +921,7 @@ static int valid(const uint8_t *in,int len) {
         (p.player[seat].teleport!=TELE_HIDDEN || (p.wait_direction[seat]!=64 && p.wait_direction[seat]!=128) || p.wait_page[seat]>=0x4F))return 0;
     for(int seat=0;seat<2;seat++)if(personal(&p.player[seat],0xAF)>1)return 0;
     for(int seat=0;seat<2;seat++)if(p.select_hold[seat]>90 || p.select_armed[seat]>1)return 0;
-    for(int seat=0;seat<2;seat++)if(p.player[seat].arrival_follow>1 || p.player[seat].entry_state>3)return 0;
+    for(int seat=0;seat<2;seat++)if(p.player[seat].arrival_follow>1 || p.player[seat].entry_state>4)return 0;
     const Picture *f[2]={&p.build,&p.frame};
     for(int i=0;i<2;i++) {
         if(f[i]->valid>1||f[i]->seat>1||f[i]->count>PART_CAP||f[i]->body.pose>=CYC_PROTO_POSE_COUNT||f[i]->body.active>1||f[i]->body.right>1||f[i]->body.flipped>1||f[i]->body.behind>1)return 0;
@@ -932,6 +947,7 @@ void mm5_coop_register(void) {
     nes_mod_register_function_entry_plugin(HOOKS[11],0xCE82,before_scroll);
     nes_mod_register_function_entry_plugin(HOOKS[12],0xDEC3,before_camera);
     nes_mod_register_function_entry_plugin(HOOKS[13],0x80A3,menu_idle);
+    nes_mod_register_function_entry_plugin(HOOKS[14],0xCA03,vehicle_scroll);
     nes_mod_register_savestate_hook("mm5.coop",get,set);nes_mod_register_savestate_validator("mm5.coop",valid);
 }
 int mm5_coop_json(char *out,int cap) {

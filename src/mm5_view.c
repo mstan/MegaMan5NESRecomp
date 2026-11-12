@@ -249,7 +249,10 @@ static int render(uint32_t *out, int W, int H, int native_x0, const uint32_t *na
             int owner = s_frame.owners[slot];
             if(s_no_flicker && owner<24)continue;
             if ((wide || s_no_flicker) && (owner == 255 ? 0 : mm5_wide_rank(owner)) != rank) continue;
-            if (replace && owner == 0) { if (slot == first) character_body(out, W, origin, &s_frame.body); }
+            if (replace && owner == 0) {
+                if (slot == first) character_body(out, W, origin, &s_frame.body);
+                if(mm5_proto_native_part(&s_frame.body,oam[slot*4+2]))sprite(out,W,origin,slot,oam);
+            }
             else sprite(out, W, origin, slot, oam);
             if(owner==0 && slot==first) {mm5_coop_draw(out,W,origin,s_opaque,s_claimed);partner=1;}
         }
