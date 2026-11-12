@@ -29,6 +29,12 @@ void mm5_pool_private_end(int commit){if(!commit)O=s_saved;s_private=0;}
 static int live(const Actor *a){return a->used && a->body.byte[TYPE];}
 static void take(Body *b,int slot){for(int i=0;i<FIELDS;i++)b->byte[i]=R(0x300+i*24+slot);}
 static void put(const Body *b,int slot){for(int i=0;i<FIELDS;i++)P(0x300+i*24+slot,b->byte[i]);}
+static void wipe(int slot) {
+    /* Native $F2C4's free-slot contract. Child initializers deliberately
+     * leave these fields alone, including the coroutine PC high byte. */
+    static const uint16_t clear[]={0x5A0,0x300,0x5B8,0x450,0x408,0x468,0x480,0x498,0x4B0,0x4C8,0x4E0,0x4F8,0x510};
+    P(0x438+slot,255);for(int i=0;i<sizeof clear/sizeof clear[0];i++)P(clear[i]+slot,0);
+}
 static int eligible(int slot) {
     int type=R(0x300+slot);
     return type==6 || type==7 || ((type==0x58 || type==0x61) && R(0x438+slot)==255);
@@ -83,7 +89,7 @@ int mm5_pool_make_room(void) {
             ((R(0x300+slot)==6 || R(0x300+slot)==7)==(pass!=0))) {
             Actor *a=&O.actor[index];memset(a,0,sizeof *a);take(&a->body,slot);a->used=1;
             a->serial=++O.serial;a->spilled=O.epoch;a->updated=O.passed[slot-8]?O.epoch:O.epoch-1;
-            P(0x300+slot,0);P(0x438+slot,255);O.spills++;return 1;
+            wipe(slot);O.spills++;return 1;
         }
     O.unsupported++;return 0;
 }
