@@ -191,6 +191,11 @@ static int private_step(int seat) {
     if(!cyc_mod_isolate_begin())return 0;
     mm5_world_private_begin();
     int owner=C.current;C.current=(uint8_t)seat;project(&C.player[seat]);center_camera();
+    /* Native $8836 clears gravity when it creates the teleport frameset.
+     * Personal beams start with that frameset already selected, so reproduce
+     * this initialization inside their private scope. The world keeps its
+     * gravity; follow arrivals restore the destination's native entry pose. */
+    if(p->teleport!=TELE_NONE){P(0xAF,0);P(0x528,R(0x528)&0xBF);}
     P(0x14,C.raw[seat]&~C.player[seat].previous&~0x30);P(0x16,C.raw[seat]&~0x30);P(0x15,0);P(0x17,0);
     s_scope=1;int enabled=hooks(1),ok=enabled;CycModRegs r;cyc_mod_regs(&r);r.a=0x1B;
     if(ok)ok=cyc_mod_call(0xFF3D,&r);
@@ -729,6 +734,8 @@ void mm5_coop_build(void) {
         if(!private_step(seat))C.failures++;
     if(C.player[seat].dead || C.player[seat].teleport==TELE_HIDDEN || !cyc_mod_isolate_begin())return;
     C.build.camera=(uint16_t)((R(0xF9)<<8)|R(0xFC));C.current=(uint8_t)seat;project(&C.player[seat]);int camera=center_camera();
+    /* Native rendering also owns the upper/lower-screen pit checks. */
+    if(C.player[seat].teleport!=TELE_NONE){P(0xAF,0);P(0x528,R(0x528)&0xBF);}
     P(0x9F,4);for(int i=0;i<256;i+=4)P(0x200+i,248);P(0xEC,255);P(0xEE,255);P(0xEF,255);
     uint8_t part_owner[64];memset(part_owner,255,sizeof part_owner);
     int ok=1,body=0;
