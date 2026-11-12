@@ -13,6 +13,9 @@
 #include "cyc_tcp.h"
 #include "mod_function_hooks.h"
 #include "mod_runtime.h"
+#ifdef CYC_WITH_RECOMP_UI
+#include "recomp_runtime_ui.h"
+#endif
 #include <stdio.h>
 #include <string.h>
 static FILE *s_log;
@@ -157,6 +160,37 @@ static void state(int id, const char *line) {
     cyc_tcp_ok(id, fields);
 }
 static void tcp(void *ctx) { (void)ctx; cyc_tcp_register("mm5_state", "MM5 state; optional view shared|split|p1|p2 uses the native view adapter", state); }
+#ifdef CYC_WITH_RECOMP_UI
+static int menu_get(void *ctx,const RecompRuntimeUiItem *item,int *out) {
+    (void)ctx;
+    if(strcmp(item->key,"mm5.coop_view"))return 0;
+    *out=mm5_coop_view_mode();return 1;
+}
+static int menu_set(void *ctx,const RecompRuntimeUiItem *item,int value) {
+    (void)ctx;
+    if(strcmp(item->key,"mm5.coop_view") || !mm5_coop_enabled() || value<0 || value>3)return 0;
+    if(mm5_net_locked() && (value!=0)!=mm5_coop_independent())return 0;
+    mm5_coop_view_set(value);return mm5_coop_view_mode()==value;
+}
+static int menu_enabled(void *ctx,const RecompRuntimeUiItem *item) {
+    (void)ctx;
+    return !strcmp(item->key,"mm5.coop_view") && mm5_coop_enabled();
+}
+#ifdef CYC_HOST_EXTRAS_HAS_NETPLAY_VALUE_POLICY
+static bool menu_netplay_value_allowed(void *ctx,const RecompRuntimeUiItem *item,int value) {
+    (void)ctx;
+    return !strcmp(item->key,"mm5.coop_view") && mm5_net_locked() &&
+        mm5_coop_independent() && value>=1 && value<=3;
+}
+#endif
+static const char *const view_choices[]={"Shared screen","Split screen","Player one","Player two"};
+static const RecompRuntimeUiItem menu_items[]={
+    {.key="mm5.coop_view",.section="Display",.label="Two-player view",
+     .description="Choose a view. Online matches keep their camera mode.",
+     .type=RECOMP_RUNTIME_UI_CHOICE,.minimum=0,.maximum=3,.step=1,.choices=view_choices,.choice_count=4}
+};
+static const RecompRuntimeUiCallbacks menu_callbacks={.get_value=menu_get,.set_value=menu_set,.is_enabled=menu_enabled};
+#endif
 const CycHostExtras *cyc_host_extras(void) {
     static const CycInputProfile profile = {
         .id = "megaman-weapons-1", .game_label = {"Previous weapon (L)", "Next weapon (R)"},
@@ -181,6 +215,12 @@ const CycHostExtras *cyc_host_extras(void) {
     static const CycHostExtras extras = {
         .power_on = power, .state_loaded = loaded, .input = input, .frame_end = end, .tcp_setup = tcp,
         .option = option, .options = options, .option_count = 13, .input_profile = &profile,
+#ifdef CYC_WITH_RECOMP_UI
+        .menu_items=menu_items,.menu_item_count=sizeof menu_items/sizeof menu_items[0],.menu_callbacks=&menu_callbacks,
+#ifdef CYC_HOST_EXTRAS_HAS_NETPLAY_VALUE_POLICY
+        .menu_netplay_value_allowed=menu_netplay_value_allowed,
+#endif
+#endif
     };
     return &extras;
 }
