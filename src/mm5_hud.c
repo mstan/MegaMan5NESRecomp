@@ -43,7 +43,9 @@ static int meter(uint8_t *out,int which,const uint8_t banks[6]) {
 void mm5_hud_reset(void) {memset(&s_build,0,sizeof s_build);memset(&s_frame,0,sizeof s_frame);}
 int mm5_hud_capture(void) {
     memset(&s_build,0,sizeof s_build);
-    if(!mm5_coop_enabled() || cyc_mod_isolated())return 1;
+    /* The native script clears the meter-enable bit for story/ending scenes.
+     * Do not manufacture personal meters when the game hides its own HUD. */
+    if(!mm5_coop_enabled() || cyc_mod_isolated() || !(R(0x2D)&128))return 1;
     Hud next={0};int boss=(R(0x2F)&128) && R(0x56)<24 && R(0x450+R(0x56));
     for(int seat=0;seat<2;seat++) {
         uint8_t inventory[13],banks[6];
