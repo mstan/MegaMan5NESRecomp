@@ -311,6 +311,30 @@ static void limit_shared(void) {
     if(x<peer-span)x=peer-span;if(x>peer+span)x=peer+span;
     if(x!=before){P(0x330,x);P(0x348,x>>8);P(0x318,0);}
 }
+static void limit_private_room(const uint8_t before[2048]) {
+    if(C.menu || C.scene_active || C.follow || C.outro || C.wiping ||
+       C.player[C.current].teleport || (R(0x30)>3 && R(0x30)!=6))return;
+    /* The real player's C9DD camera pass also supplies the native 16/F0
+     * room edges. A private controller must retain those edges, including
+     * recoil: offscreen drawing cannot advance its hurt animation. */
+    int flags=before[0x29],page=before[0xF9],lo=page*256+16,hi=page*256+240;
+    if(before[0x23]!=0x1D && (flags&32) && !(flags&0xC0)) {
+        int start=page-before[0x2B],section=flags&31;
+        if(start<0)return;
+        lo=start*256+16;hi=(start+before[0x2A])*256+240;
+        /* Match the existing native exit admission. Ordinary movement can
+         * lead an authored exit; recoil cannot leave the room by itself. */
+        if(R(0x30)<=3) {
+            int next=mm5_cart_prg(C.stage,0xA951+section);
+            if(!before[0x55] && (next&32) && !(next&0xC0))hi=65535;
+            if(section && (mm5_cart_prg(C.stage,0xA968+section)&64) &&
+               (mm5_cart_prg(C.stage,0xA94F+section)&32))lo=0;
+        }
+    }
+    int x=R(0x330)+256*R(0x348),clamped=x;
+    if(clamped<lo)clamped=lo;if(clamped>hi)clamped=hi;
+    if(clamped!=x){P(0x330,clamped);P(0x348,clamped>>8);P(0x318,0);}
+}
 static int private_step(int seat) {
     Player *p=&C.player[seat];int state=personal(p,0x30);
     if(p->teleport==TELE_OUT && personal(p,0x390)) {
@@ -361,7 +385,7 @@ static int private_step(int seat) {
             if(p->arrival_follow){p->arrival_follow=0;C.arrivals[seat]++;}
             reset_select();
         }
-        limit_shared();capture(p);snapshot_ram(after);C.updates[seat]++;C.last_step[seat]=cyc_ring_frame;
+        limit_private_room(before);limit_shared();capture(p);snapshot_ram(after);C.updates[seat]++;C.last_step[seat]=cyc_ring_frame;
     }
     if(enabled)hooks(0);s_scope=0;cyc_mod_isolate_end();C.current=(uint8_t)owner;mm5_world_private_end(ok);
     if(ok)merge_world(before,after);return ok;
